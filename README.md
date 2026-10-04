@@ -419,6 +419,11 @@ an offline-then-online scenario.
 
 Backend tests: `cd backend && npm test`.
 
+**CI.** `.github/workflows/ci.yml` runs on every pull request and on pushes to `main`. The
+Android job runs `./gradlew assembleDebug test lint` on JDK 21 and uploads the debug APK, test
+reports, lint report and rendered screenshots as artifacts. The backend job runs `npm test` on
+Node 20.
+
 ## Known limitations
 
 - The bridge only sees what WhatsApp puts in its notifications. Messages in muted groups, in a chat
