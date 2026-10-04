@@ -38,12 +38,12 @@ class NotificationProcessor(
                         is ProcessingOutcome.Ignored -> when (outcome.reason) {
                             IgnoreReason.NO_CONTENT, IgnoreReason.NOT_A_GROUP,
                             IgnoreReason.GROUP_NOT_AUTHORIZED, IgnoreReason.GROUP_SUMMARY ->
-                                logger.info(TAG, "Ignored WhatsApp notification: ${outcome.reason.name}")
+                                logger.info(TAG, "Ignored notification: ${outcome.reason.name}")
                             else -> Unit
                         }
                     }
                 } catch (e: Exception) {
-                    logger.error(TAG, "Failed to process WhatsApp notification", e)
+                    logger.error(TAG, "Failed to process notification", e)
                 }
             }
         }

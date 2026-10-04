@@ -5,6 +5,7 @@ import com.okb.whatsappbridge.data.remote.api.BackendConfig
 import com.okb.whatsappbridge.data.remote.api.BridgeApi
 import com.okb.whatsappbridge.data.remote.api.MediaUploader
 import com.okb.whatsappbridge.data.remote.dto.MediaCompleteRequest
+import com.okb.whatsappbridge.data.remote.dto.MediaCompleteResponse
 import com.okb.whatsappbridge.data.remote.dto.MediaIntentRequest
 import com.okb.whatsappbridge.domain.repository.DeviceIdentityRepository
 import com.okb.whatsappbridge.domain.repository.MediaRepository
@@ -109,9 +110,12 @@ class SyncMediaUseCase(
         media.markUploading(c.id, now)
 
         // 1. Content-based dedupe: identical bytes already uploaded from this device → reuse the object.
+        //    No bytes are transferred, but `complete` is still sent (idempotent on the backend) so the
+        //    existing object is linked to THIS message too — flood reports find their photos that way.
         media.findUploadedBySha256(c.sha256)?.let { existing ->
-            media.markUploaded(c.id, existing.objectKey, existing.etag, existing.remoteRef, clock())
-            return UploadResult.Done
+            return complete(config, c, existing.objectKey, existing.etag, now) { r ->
+                media.markUploaded(c.id, r?.objectKey ?: existing.objectKey, r?.etag ?: existing.etag, r?.remoteRef ?: existing.remoteRef, clock())
+            }
         }
 
         // 2. Intent: obtain an upload URL (or a duplicate verdict) from the authenticated backend.
@@ -124,7 +128,7 @@ class SyncMediaUseCase(
             originalFileName = c.originalFileName,
             groupName = c.groupName,
             capturedAt = iso(c.createdAt.takeIf { it > 0 } ?: now),
-            messageFingerprint = null,
+            messageFingerprint = c.messageFingerprint,
         )
         val intent = when (val r = api.mediaIntent(config, intentReq)) {
             is ApiResult.Success -> r.value
@@ -152,6 +156,19 @@ class SyncMediaUseCase(
         }
 
         // 4. Complete: record the object in the backend index. Idempotent on retries.
+        return complete(config, c, objectKey, etag, now) { r ->
+            media.markUploaded(c.id, r?.objectKey ?: objectKey, r?.etag ?: etag, r?.remoteRef, clock())
+        }
+    }
+
+    private suspend fun complete(
+        config: BackendConfig,
+        c: MediaUploadCandidate,
+        objectKey: String,
+        etag: String?,
+        now: Long,
+        onSuccess: suspend (MediaCompleteResponse?) -> Unit,
+    ): UploadResult {
         val completeReq = MediaCompleteRequest(
             deviceId = c.deviceId,
             sha256 = c.sha256,
@@ -163,12 +180,12 @@ class SyncMediaUseCase(
             originalFileName = c.originalFileName,
             groupName = c.groupName,
             senderName = c.senderName,
-            messageFingerprint = null,
+            messageFingerprint = c.messageFingerprint,
             capturedAt = iso(c.createdAt.takeIf { it > 0 } ?: now),
         )
         return when (val r = api.mediaComplete(config, completeReq)) {
             is ApiResult.Success -> {
-                media.markUploaded(c.id, r.value.objectKey ?: objectKey, r.value.etag ?: etag, r.value.remoteRef, clock())
+                onSuccess(r.value)
                 UploadResult.Done
             }
             is ApiResult.NetworkError -> retry(c, r.message)

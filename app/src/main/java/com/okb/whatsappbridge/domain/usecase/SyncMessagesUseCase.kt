@@ -8,6 +8,7 @@ import com.okb.whatsappbridge.domain.repository.DeviceIdentityRepository
 import com.okb.whatsappbridge.domain.repository.MessageRepository
 import com.okb.whatsappbridge.domain.repository.SettingsRepository
 import com.okb.whatsappbridge.domain.repository.UploadCandidate
+import com.okb.whatsappbridge.source.SourcePlatform
 import com.okb.whatsappbridge.util.logging.BridgeLogger
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -152,6 +153,7 @@ class SyncMessagesUseCase(
         mediaStatus = mediaStatus.name,
         sourcePackage = packageName,
         capturedAt = isoTimestamp(createdAt.takeIf { it > 0 } ?: now),
+        platform = SourcePlatform.fromPackage(packageName)?.wireName,
     )
 
     private fun isoTimestamp(epochMillis: Long): String =

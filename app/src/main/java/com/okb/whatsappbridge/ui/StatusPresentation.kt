@@ -43,6 +43,13 @@ object StatusPresentation {
         )
     }
 
+    /** Viber is optional, so its absence is neutral rather than an error. */
+    fun viber(installed: List<String>?): Presented = when {
+        installed == null -> Presented(StatusLevel.NEUTRAL, "Checking")
+        installed.isEmpty() -> Presented(StatusLevel.NEUTRAL, "Not installed", "Only needed to monitor Viber groups.")
+        else -> Presented(StatusLevel.OK, "Detected", "Authorized Viber groups are captured like WhatsApp groups.")
+    }
+
     fun backend(
         configured: Boolean,
         lastCheckOk: Boolean?,

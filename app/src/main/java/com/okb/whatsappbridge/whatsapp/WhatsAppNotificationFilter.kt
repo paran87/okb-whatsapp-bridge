@@ -1,8 +1,12 @@
 package com.okb.whatsappbridge.whatsapp
 
+import com.okb.whatsappbridge.source.SourcePlatform
+import com.okb.whatsappbridge.viber.ViberNotificationRules
+
 /** Why a notification (or message) was not captured. Used for diagnostics only. */
 enum class IgnoreReason {
-    NOT_WHATSAPP,
+    /** Not from a supported messaging app (WhatsApp, WhatsApp Business or Viber). */
+    UNSUPPORTED_APP,
     MONITORING_PAUSED,
     GROUP_SUMMARY,
     ONGOING,
@@ -19,18 +23,30 @@ sealed interface FilterDecision {
 }
 
 /**
- * Decides whether a notification may contain a WhatsApp group message.
+ * Decides whether a notification may contain a group message from a supported messaging platform
+ * ([SourcePlatform]: WhatsApp or Viber). The checks are the same for every platform; only the
+ * service-notification ignore list is platform-specific.
  *
  * Group authorization is a separate step ([GroupAllowlist]) because it needs the parsed group name.
  */
 class WhatsAppNotificationFilter(
     private val rules: SystemNotificationRules = SystemNotificationRules.DEFAULT,
+    private val viberRules: SystemNotificationRules = ViberNotificationRules.DEFAULT,
 ) {
 
     fun isWhatsAppPackage(packageName: String?): Boolean = WhatsAppPackages.isWhatsApp(packageName)
 
+    fun isSupportedPackage(packageName: String?): Boolean = SourcePlatform.isSupported(packageName)
+
+    private fun rulesFor(platform: SourcePlatform): SystemNotificationRules = when (platform) {
+        SourcePlatform.WHATSAPP -> rules
+        SourcePlatform.VIBER -> viberRules
+    }
+
     fun evaluate(snapshot: NotificationSnapshot): FilterDecision {
-        if (!isWhatsAppPackage(snapshot.packageName)) return FilterDecision.Ignore(IgnoreReason.NOT_WHATSAPP)
+        val platform = SourcePlatform.fromPackage(snapshot.packageName)
+            ?: return FilterDecision.Ignore(IgnoreReason.UNSUPPORTED_APP)
+        val rules = rulesFor(platform)
         // The per-chat notifications carry the content; the bundle summary only repeats it.
         if (snapshot.isGroupSummary) return FilterDecision.Ignore(IgnoreReason.GROUP_SUMMARY)
         if (snapshot.isOngoing) return FilterDecision.Ignore(IgnoreReason.ONGOING)
@@ -54,7 +70,8 @@ class WhatsAppNotificationFilter(
     }
 
     /** True for placeholder messages such as "This message was deleted". */
-    fun isIgnoredMessageText(text: String?): Boolean = rules.isIgnoredMessage(text)
+    fun isIgnoredMessageText(text: String?, platform: SourcePlatform = SourcePlatform.WHATSAPP): Boolean =
+        rulesFor(platform).isIgnoredMessage(text)
 }
 
 /** Persistent allowlist matching. Only explicitly authorized groups are ever captured. */

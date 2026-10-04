@@ -18,7 +18,7 @@ class WhatsAppNotificationFilterTest {
         assertFalse(filter.isWhatsAppPackage("com.whatsapp.fake"))
         assertFalse(filter.isWhatsAppPackage(null))
         assertEquals(
-            FilterDecision.Ignore(IgnoreReason.NOT_WHATSAPP),
+            FilterDecision.Ignore(IgnoreReason.UNSUPPORTED_APP),
             filter.evaluate(Snapshots.groupMessaging(packageName = "com.google.android.gm")),
         )
     }

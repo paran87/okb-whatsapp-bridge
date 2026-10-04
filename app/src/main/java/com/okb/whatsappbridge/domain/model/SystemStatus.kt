@@ -14,6 +14,8 @@ data class SystemStatus(
     val sdkInt: Int,
     val manufacturer: String,
     val model: String,
+    /** Viber is optional: only needed when Viber groups are monitored. */
+    val installedViberPackages: List<String> = emptyList(),
 ) {
     val whatsAppInstalled: Boolean get() = installedWhatsAppPackages.isNotEmpty()
 }

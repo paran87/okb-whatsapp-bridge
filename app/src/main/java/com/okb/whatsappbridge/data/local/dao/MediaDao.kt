@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.Flow
 data class MediaWithQueue(
     @androidx.room.Embedded val media: MediaAttachmentEntity,
     val attemptCount: Int,
+    /** Fingerprint of the message the media belongs to, so the backend can link media to its message. */
+    val messageFingerprint: String?,
 )
 
 /** Compact media summary joined onto a message row for the Messages list. */
@@ -83,8 +85,9 @@ abstract class MediaDao {
 
     @Query(
         """
-        SELECT m.*, q.attemptCount AS attemptCount
+        SELECT m.*, q.attemptCount AS attemptCount, msg.fingerprint AS messageFingerprint
         FROM media m INNER JOIN media_upload_queue q ON q.mediaId = m.id
+        LEFT JOIN messages msg ON msg.id = m.messageId
         WHERE m.acquisitionStatus = 'AVAILABLE' AND m.id NOT IN (:excludedIds)
           AND (
             m.uploadStatus IN ('PENDING', 'RETRYING', 'UPLOADING')

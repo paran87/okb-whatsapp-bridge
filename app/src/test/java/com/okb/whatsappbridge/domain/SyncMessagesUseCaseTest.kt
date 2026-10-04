@@ -129,6 +129,24 @@ class SyncMessagesUseCaseTest {
         assertEquals(64, request.fingerprint.length)
         assertTrue(request.clientMessageId.isNotBlank())
         assertEquals("com.whatsapp", request.sourcePackage)
+        assertEquals("whatsapp", request.platform)
         assertEquals("OKB Monitoring", request.groupName)
+    }
+
+    @Test
+    fun `viber messages are uploaded through the same queue with platform viber`() = runTest {
+        bridge.process(
+            Snapshots.groupMessaging(
+                messages = listOf(SnapshotMessage("Flood height 0.20 m at Daang Hari", T0 + 120_000, "Engineer A")),
+                packageName = "com.viber.voip",
+                jid = null,
+            ),
+        )
+        bridge.sync(SyncTrigger.IMMEDIATE)
+        val viber = api.uploaded.single { it.sourcePackage == "com.viber.voip" }
+        assertEquals("viber", viber.platform)
+        assertEquals("OKB Monitoring", viber.groupName)
+        assertEquals("Engineer A", viber.senderName)
+        assertEquals(3, api.uploaded.size)
     }
 }

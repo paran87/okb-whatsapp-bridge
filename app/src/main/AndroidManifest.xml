@@ -11,10 +11,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
-    <!-- Package visibility (Android 11+): needed to detect whether WhatsApp is installed. -->
+    <!-- Package visibility (Android 11+): needed to detect whether WhatsApp / Viber are installed. -->
     <queries>
         <package android:name="com.whatsapp" />
         <package android:name="com.whatsapp.w4b" />
+        <package android:name="com.viber.voip" />
     </queries>
 
     <application
