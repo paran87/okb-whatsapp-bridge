@@ -143,6 +143,24 @@ class MediaCaptureTest {
     }
 
     @Test
+    fun `caption-less photo (no text) is captured as an IMAGE message with a media row`() = runTest {
+        val uri = "content://com.whatsapp/media/nocaption"
+        bridge.content.bytesByUri[uri] = imageBytes
+        bridge.content.metadataByUri[uri] = MediaUriMetadata("IMG.jpg", "image/jpeg", imageBytes.size.toLong())
+        // A photo alone: MessagingStyle message with media data and NO text.
+        val outcome = bridge.process(
+            Snapshots.groupMessaging(messages = listOf(SnapshotMessage(null, T0, "Ana", dataUri = uri, dataMimeType = "image/jpeg"))),
+        )
+        assertEquals(1, (outcome as ProcessingOutcome.Captured).inserted)
+        assertEquals(1, outcome.mediaDetected)
+        val messageId = lastMessageId()
+        val stored = bridge.db.messageDao().getById(messageId)!!
+        assertEquals(MediaType.IMAGE.name, stored.mediaType)
+        assertNull("caption-less photo has null text", stored.messageText)
+        assertEquals(MediaAcquisitionStatus.AVAILABLE, mediaRow(messageId)!!.acquisitionStatus)
+    }
+
+    @Test
     fun `empty file is treated as UNAVAILABLE and the local copy removed`() = runTest {
         val uri = "content://x/empty"
         bridge.content.bytesByUri[uri] = ByteArray(0)

@@ -51,7 +51,10 @@ class WhatsAppNotificationParser(
     fun parse(snapshot: NotificationSnapshot): ParsedNotification {
         val type = detectConversationType(snapshot)
         val candidates = groupNameCandidates(snapshot, type)
-        val messages = if (snapshot.messages.any { !it.text.isNullOrBlank() }) {
+        val hasStyledMessages = snapshot.messages.any {
+            !it.text.isNullOrBlank() || !it.dataMimeType.isNullOrBlank() || !it.dataUri.isNullOrBlank()
+        }
+        val messages = if (hasStyledMessages) {
             parseMessagingStyle(snapshot, type)
         } else {
             parseFallback(snapshot, type)
@@ -110,21 +113,30 @@ class WhatsAppNotificationParser(
     private fun parseMessagingStyle(s: NotificationSnapshot, type: ConversationType): List<ParsedMessage> {
         val lastIndex = s.messages.lastIndex
         return s.messages.mapIndexedNotNull { index, m ->
-            val text = m.text?.trim()
-            if (text.isNullOrEmpty()) return@mapIndexedNotNull null
+            val text = m.text?.trim()?.takeIf { it.isNotEmpty() }
+            val pictureHere = s.hasPicture && index == lastIndex
+            val hasMediaEvidence = !m.dataMimeType.isNullOrBlank() || !m.dataUri.isNullOrBlank() || pictureHere
+            // Keep a message when it has text OR carries media (e.g. a caption-less photo).
+            if (text == null && !hasMediaEvidence) return@mapIndexedNotNull null
             // MessagingStyle convention: a null sender is the device owner ("You").
             val sender = m.sender?.trim()?.takeIf { it.isNotEmpty() }
                 ?: s.selfDisplayName?.trim()?.takeIf { it.isNotEmpty() }
-            val body: String = text
             val (timestamp, source) = when {
                 m.timestamp > 0 -> m.timestamp to TimestampSource.MESSAGE
                 s.whenTime > 0 -> s.whenTime to TimestampSource.NOTIFICATION_WHEN
                 else -> s.postTime to TimestampSource.POST_TIME
             }
-            // A preview picture belongs to the most recent message only.
-            val media = mediaDetector.detect(body, hasPicture = s.hasPicture && index == lastIndex)
+            // A message carrying media data IS media (the text, if any, is its caption); derive the
+            // type from the MIME first, then a preview picture, then the text, then unknown.
+            val media = mediaDetector.fromMime(m.dataMimeType)
+                ?: when {
+                    pictureHere -> MediaType.IMAGE
+                    text != null -> mediaDetector.detect(text, hasPicture = false)
+                    hasMediaEvidence -> MediaType.UNKNOWN
+                    else -> MediaType.UNKNOWN
+                }
             ParsedMessage(
-                sender, body, timestamp, source, media, mediaDetector.statusFor(media),
+                sender, text, timestamp, source, media, mediaDetector.statusFor(media),
                 dataUri = m.dataUri, dataMimeType = m.dataMimeType,
             )
         }

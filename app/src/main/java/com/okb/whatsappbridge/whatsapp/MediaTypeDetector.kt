@@ -30,6 +30,20 @@ class MediaTypeDetector {
         }
     }
 
+    /** Media kind from a MIME type (used for caption-less media carried as MessagingStyle data). */
+    fun fromMime(mimeType: String?): MediaType? {
+        val mime = mimeType?.substringBefore(';')?.trim()?.lowercase() ?: return null
+        return when {
+            mime.isEmpty() -> null
+            mime.startsWith("image/") -> if (mime.contains("webp")) MediaType.STICKER else MediaType.IMAGE
+            mime.startsWith("video/") -> MediaType.VIDEO
+            mime.startsWith("audio/") -> MediaType.AUDIO
+            mime == "text/x-vcard" || mime == "text/vcard" -> MediaType.UNKNOWN
+            mime.contains('/') -> MediaType.DOCUMENT
+            else -> null
+        }
+    }
+
     fun statusFor(type: MediaType): MediaStatus =
         if (type == MediaType.TEXT) MediaStatus.NONE else MediaStatus.UNAVAILABLE
 
