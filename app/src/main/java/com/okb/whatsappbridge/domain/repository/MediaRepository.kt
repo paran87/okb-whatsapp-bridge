@@ -33,6 +33,8 @@ data class MediaUploadCandidate(
     val sha256: String,
     val createdAt: Long,
     val attemptCount: Int,
+    /** Fingerprint of the owning message (null only if the message row is gone). */
+    val messageFingerprint: String? = null,
 )
 
 /** Already-uploaded media with identical bytes (for content-based dedupe). */

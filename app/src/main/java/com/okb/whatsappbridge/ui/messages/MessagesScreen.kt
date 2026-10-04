@@ -42,7 +42,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.sp
 import com.okb.whatsappbridge.ui.components.color
 import com.okb.whatsappbridge.ui.theme.MonoValue
-import com.okb.whatsappbridge.whatsapp.WhatsAppPackages
+import com.okb.whatsappbridge.source.SourcePlatform
 
 @Composable
 fun MessagesScreen(viewModel: MessagesViewModel, onOpenDetail: (String) -> Unit) {
@@ -69,7 +69,7 @@ fun MessagesScreen(viewModel: MessagesViewModel, onOpenDetail: (String) -> Unit)
             list.isEmpty() -> Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
                 Text(
                     if (filter == null) {
-                        "No messages captured yet.\nMessages from authorized WhatsApp groups appear here as soon as " +
+                        "No messages captured yet.\nMessages from authorized WhatsApp and Viber groups appear here as soon as " +
                             "their notifications arrive – the app does not need to be open."
                     } else {
                         "No messages with status ${filter!!.label()}."
@@ -124,7 +124,7 @@ private fun MessageCard(message: BridgeMessage, onOpenDetail: (String) -> Unit) 
         }
         val meta = buildList {
             if (message.media == null) add(message.mediaType.name)
-            add(WhatsAppPackages.displayName(message.packageName))
+            add(SourcePlatform.displayNameFor(message.packageName))
             if (message.attemptCount > 0) add("${message.attemptCount} attempt(s)")
             message.serverId?.let { add("server id $it") }
         }

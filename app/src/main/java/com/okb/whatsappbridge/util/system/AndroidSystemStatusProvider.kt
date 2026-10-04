@@ -15,6 +15,7 @@ import com.okb.whatsappbridge.domain.model.SystemStatus
 import com.okb.whatsappbridge.domain.model.SystemStatusProvider
 import com.okb.whatsappbridge.service.ListenerConnectionState
 import com.okb.whatsappbridge.service.WhatsAppNotificationListenerService
+import com.okb.whatsappbridge.viber.ViberPackages
 import com.okb.whatsappbridge.whatsapp.WhatsAppPackages
 
 /** Reads real Android state. Nothing here is inferred from whether the UI is open. */
@@ -41,6 +42,7 @@ class AndroidSystemStatusProvider(private val context: Context) : SystemStatusPr
             notificationAccessGranted = isNotificationAccessGranted(),
             listenerConnected = isListenerConnected(),
             installedWhatsAppPackages = WhatsAppPackages.ALL.filter(::isInstalled).sorted(),
+            installedViberPackages = ViberPackages.ALL.filter(::isInstalled).sorted(),
             ignoringBatteryOptimizations = power?.isIgnoringBatteryOptimizations(context.packageName) ?: false,
             backgroundRestricted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 activityManager?.isBackgroundRestricted

@@ -49,6 +49,7 @@ class OkHttpBridgeApiTest {
         mediaStatus = "NONE",
         sourcePackage = "com.whatsapp",
         capturedAt = "2026-10-04T08:42:01+08:00",
+        platform = "whatsapp",
     )
 
     @Test

@@ -76,7 +76,7 @@ class ProcessNotificationUseCaseTest {
     @Test
     fun `unrelated packages are ignored without touching state`() = runTest {
         val outcome = useCase(Snapshots.groupMessaging(packageName = "org.telegram.messenger"))
-        assertEquals(ProcessingOutcome.Ignored(IgnoreReason.NOT_WHATSAPP), outcome)
+        assertEquals(ProcessingOutcome.Ignored(IgnoreReason.UNSUPPORTED_APP), outcome)
         assertNull(settings.state.value.lastNotificationAt)
     }
 

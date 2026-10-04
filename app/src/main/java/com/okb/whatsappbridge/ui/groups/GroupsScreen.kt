@@ -51,11 +51,12 @@ fun GroupsScreen(viewModel: GroupsViewModel) {
         modifier = Modifier.fillMaxSize(),
     ) {
         item {
-            Panel(title = "Authorize a WhatsApp group", modifier = Modifier.widthIn(max = 900.dp)) {
+            Panel(title = "Authorize a WhatsApp or Viber group", modifier = Modifier.widthIn(max = 900.dp)) {
                 Text(
                     "Only groups explicitly authorized here are captured and uploaded. Enter the group name exactly " +
-                        "as it appears in WhatsApp (case and extra spaces are ignored). Groups the bridge has seen in " +
-                        "notifications are listed below unchecked – tick them to authorize.",
+                        "as it appears in WhatsApp or Viber (case and extra spaces are ignored). The allowlist is shared: " +
+                        "a name authorizes a WhatsApp group and a Viber group with that exact name. Groups the bridge " +
+                        "has seen in notifications are listed below unchecked – tick them to authorize.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

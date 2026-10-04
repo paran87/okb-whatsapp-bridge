@@ -3,11 +3,13 @@ package com.okb.whatsappbridge.service
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.okb.whatsappbridge.OkbBridgeApplication
-import com.okb.whatsappbridge.whatsapp.WhatsAppPackages
+import com.okb.whatsappbridge.source.SourcePlatform
 import kotlinx.coroutines.launch
 
 /**
- * Primary background monitoring mechanism.
+ * Primary background monitoring mechanism, for every supported messaging app (WhatsApp and Viber).
+ * The class name is kept for compatibility: Android remembers the granted Notification Access per
+ * component name, so renaming it would silently revoke access on every installed phone.
  *
  * Android binds this service on its own whenever the user has granted Notification Access – after boot,
  * after an app update, and regardless of whether the UI is open, the screen is off or the phone is
@@ -26,10 +28,10 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
         c.healthAlerts.clear()
         c.appScope.launch { c.settingsRepository.recordListenerConnected(System.currentTimeMillis()) }
 
-        // Catch up on WhatsApp notifications still shown in the shade that were posted while the
+        // Catch up on WhatsApp/Viber notifications still shown in the shade that were posted while the
         // listener was not bound (e.g. right after a reboot). Duplicates are rejected by fingerprint.
         val active = runCatching { activeNotifications }.getOrNull().orEmpty()
-        active.filter { WhatsAppPackages.isWhatsApp(it.packageName) }.forEach(::handle)
+        active.filter { SourcePlatform.isSupported(it.packageName) }.forEach(::handle)
     }
 
     override fun onListenerDisconnected() {
@@ -43,7 +45,7 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
-        if (sbn == null || !WhatsAppPackages.isWhatsApp(sbn.packageName)) return
+        if (sbn == null || !SourcePlatform.isSupported(sbn.packageName)) return
         handle(sbn)
     }
 
@@ -56,7 +58,7 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
         val snapshot = try {
             NotificationSnapshotExtractor.extract(sbn)
         } catch (e: RuntimeException) {
-            container.logger.error(TAG, "Unreadable WhatsApp notification layout", e)
+            container.logger.error(TAG, "Unreadable ${SourcePlatform.displayNameFor(sbn.packageName)} notification layout", e)
             return
         }
         container.notificationProcessor.submit(snapshot)

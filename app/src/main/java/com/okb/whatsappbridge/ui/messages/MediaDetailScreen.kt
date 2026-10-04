@@ -23,7 +23,7 @@ import com.okb.whatsappbridge.ui.components.KeyValueLine
 import com.okb.whatsappbridge.ui.components.Panel
 import com.okb.whatsappbridge.ui.components.SectionDivider
 import com.okb.whatsappbridge.ui.components.StatusLine
-import com.okb.whatsappbridge.whatsapp.WhatsAppPackages
+import com.okb.whatsappbridge.source.SourcePlatform
 
 @Composable
 fun MediaDetailScreen(viewModel: MediaDetailViewModel) {
@@ -45,7 +45,7 @@ fun MediaDetailScreen(viewModel: MediaDetailViewModel) {
                 KeyValueLine("Group", message.groupName ?: "—", mono = false)
                 KeyValueLine("Sender", message.senderName ?: "—", mono = false)
                 KeyValueLine("Timestamp", Formatters.time(message.timestamp))
-                KeyValueLine("Source", WhatsAppPackages.displayName(message.packageName), mono = false)
+                KeyValueLine("Source", SourcePlatform.displayNameFor(message.packageName), mono = false)
                 KeyValueLine("Upload", message.uploadStatus.label(), mono = false)
                 SectionDivider()
                 Text("Caption / text", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

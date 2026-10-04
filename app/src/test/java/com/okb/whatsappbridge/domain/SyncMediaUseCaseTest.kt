@@ -73,6 +73,12 @@ class SyncMediaUseCaseTest {
         // The complete call carried the content hash and object key for server-side dedupe.
         assertEquals(64, api.completes.first().sha256.length)
         assertTrue(api.completes.first().objectKey.contains(api.completes.first().sha256))
+        // ...and the owning message's fingerprint, so the backend can attach the photo to its report.
+        val messageFingerprint = bridge.messages.observeRecent(null, 1).first().first().let { m ->
+            bridge.db.messageDao().getById(m.id)!!.fingerprint
+        }
+        assertEquals(messageFingerprint, api.intents.first().messageFingerprint)
+        assertEquals(messageFingerprint, api.completes.first().messageFingerprint)
         assertEquals(T0 + 5000, bridge.settings.current().lastMediaUploadAt)
     }
 
@@ -100,6 +106,10 @@ class SyncMediaUseCaseTest {
         assertEquals(1, outcome.uploaded)
         assertTrue("no intent needed for duplicate content", api.intents.isEmpty())
         assertTrue("no bytes re-uploaded", bridge.uploader.puts.isEmpty())
+        // The existing object is still linked to the second message (metadata only).
+        assertEquals(2, api.completes.size)
+        assertEquals(api.completes[0].objectKey, api.completes[1].objectKey)
+        assertTrue(api.completes[0].messageFingerprint != api.completes[1].messageFingerprint)
     }
 
     @Test

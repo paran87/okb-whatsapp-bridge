@@ -1,8 +1,8 @@
 {
   "name": "okb-bridge-reference-backend",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
-  "description": "Minimal reference backend for the OKB WhatsApp Bridge (development and acceptance testing).",
+  "description": "Minimal reference backend for the OKB WhatsApp Bridge: message, media and flood-report extraction (development and acceptance testing).",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

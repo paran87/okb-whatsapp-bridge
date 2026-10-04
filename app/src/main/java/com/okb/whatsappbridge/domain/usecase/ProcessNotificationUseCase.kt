@@ -9,6 +9,7 @@ import com.okb.whatsappbridge.domain.repository.NewMediaAttachment
 import com.okb.whatsappbridge.domain.repository.SaveResult
 import com.okb.whatsappbridge.domain.repository.SettingsRepository
 import com.okb.whatsappbridge.domain.repository.UploadScheduler
+import com.okb.whatsappbridge.source.SourcePlatform
 import com.okb.whatsappbridge.util.fingerprint.MessageFingerprint
 import com.okb.whatsappbridge.whatsapp.ConversationType
 import com.okb.whatsappbridge.whatsapp.FilterDecision
@@ -32,8 +33,11 @@ sealed interface ProcessingOutcome {
 /**
  * The capture pipeline executed for every posted notification, entirely in the background:
  *
- * monitoring enabled? → WhatsApp package? → system notification? → parse → authorized group?
+ * monitoring enabled? → supported app (WhatsApp / Viber)? → system notification? → parse → authorized group?
  * → fingerprint → save message to Room → (Phase 2) create+acquire linked media → schedule uploads.
+ *
+ * The pipeline is the same for every [SourcePlatform]; the platform only selects its ignore rules and
+ * scopes the fingerprint, and it is preserved through the stored package name.
  *
  * The network is never touched here: messages (and any acquired media) are persisted first so nothing
  * is lost if the backend or connectivity is unavailable. Media acquisition never blocks or fails text
@@ -53,7 +57,8 @@ class ProcessNotificationUseCase(
 ) {
 
     suspend operator fun invoke(snapshot: NotificationSnapshot): ProcessingOutcome {
-        if (!filter.isWhatsAppPackage(snapshot.packageName)) return ProcessingOutcome.Ignored(IgnoreReason.NOT_WHATSAPP)
+        val platform = SourcePlatform.fromPackage(snapshot.packageName)
+            ?: return ProcessingOutcome.Ignored(IgnoreReason.UNSUPPORTED_APP)
 
         val now = clock()
         settings.recordNotificationReceived(now)
@@ -76,12 +81,13 @@ class ProcessNotificationUseCase(
         var duplicates = 0
         var mediaDetected = 0
         for (message in parsed.messages) {
-            if (filter.isIgnoredMessageText(message.text)) continue
+            if (filter.isIgnoredMessageText(message.text, platform)) continue
             val fingerprint = MessageFingerprint.compute(
                 groupName = authorizedGroup,
                 senderName = message.senderName,
                 messageText = message.text,
                 timestamp = message.timestamp,
+                platformScope = platform.fingerprintScope,
             )
             val outcome = messages.saveCaptured(
                 NewCapturedMessage(

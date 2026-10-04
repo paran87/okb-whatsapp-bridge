@@ -159,6 +159,7 @@ class RoomMediaRepository(
             sha256 = m.sha256 ?: return null,
             createdAt = m.createdAt,
             attemptCount = attemptCount,
+            messageFingerprint = messageFingerprint,
         )
     }
 

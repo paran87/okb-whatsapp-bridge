@@ -1,8 +1,9 @@
 # OKB WhatsApp Bridge
 
 Android application (`com.okb.whatsappbridge`) for a dedicated Android phone. It watches the
-notifications of **authorized WhatsApp groups** in the background, stores every message locally,
-and uploads it to the OKB backend.
+notifications of **authorized WhatsApp and Viber groups** in the background, stores every message
+locally, and uploads it to the OKB backend, which extracts structured flood-monitoring reports from
+them ([Phase 3](#phase-3--flood-report-extraction-whatsapp--viber)).
 
 ```
 WhatsApp group ─▶ Android notification ─▶ NotificationListenerService ─▶ group filter
@@ -602,6 +603,200 @@ curl -H "Authorization: Bearer <token>" "http://<server-ip>:8080/api/v1/media?li
 
 > Do not claim any of these passed until executed on the physical device.
 
+## Phase 3 — Flood-report extraction (WhatsApp + Viber)
+
+Phase 3 turns captured group messages into structured DPWH flood-monitoring reports for the OKB
+Command Center. **WhatsApp and Viber feed one pipeline**: the platform is kept as provenance but never
+changes how a report is extracted.
+
+```
+WhatsApp group ─┐                                         ┌─ deterministic prefilter (system notices, greetings,
+                ├─ Android listener ─ Room ─ upload ─▶ backend │  caption-less media) — no AI cost
+Viber group ────┘   (same pipeline; platform kept)   message ─┤
+                                                     store    └─ AI extraction (structured JSON, server-side)
+                                                                   → schema validation → normalization
+                                                                   → anti-fabrication rules → report
+                                                                   → needs_review / extracted / ignored / failed
+```
+
+**Core rule: extract what is present, leave what is absent as `null`, flag what is uncertain,
+preserve the original, never guess.** A report with missing fields is still a valid report: it goes
+to `needs_review` with the missing fields listed. It is never marked `failed` for that.
+
+### Viber capture (Android)
+
+Viber group messages are captured with the **same `NotificationListenerService`** and the same
+filter → parser → Room → upload pipeline as WhatsApp. Platform-specific code is limited to
+`source/SourcePlatform.kt` (packages, wire name) and `viber/ViberNotificationRules.kt` (Viber
+service-notification ignore list). The upload body now carries `"platform": "whatsapp" | "viber"`
+(older backends ignore it; the backend can also derive it from `sourcePackage`).
+
+- Viber posts standard Android `MessagingStyle` notifications (group name, sender, per-message time,
+  and optionally an image URI), which the existing parser already reads. No Viber database, private
+  API, accessibility scraping or root is used.
+- What Viber does not expose in a notification stays `null` (for example stable group/sender ids,
+  which Android notifications do not provide for either app).
+- Media: like WhatsApp, the original file is acquired **only** when the notification legitimately
+  carries a readable content URI. Otherwise the message is stored with `mediaStatus = UNAVAILABLE` and
+  the backend shows it as a media indicator.
+- The group allowlist is shared by name: authorizing "DPWH Flood Monitoring" authorizes a WhatsApp
+  group and a Viber group with that exact name.
+- WhatsApp message fingerprints are unchanged, so dedup of already-stored messages is unaffected.
+  Viber fingerprints are platform-scoped, so the same text in a WhatsApp group and a Viber group is
+  **two** source messages. The backend also deduplicates by `platform + fingerprint`.
+- The listener class keeps its name (`WhatsAppNotificationListenerService`). Android stores the
+  Notification Access grant per component name, so renaming it would revoke access on installed phones.
+- Media uploads now send the owning message's fingerprint (`messageFingerprint`) so the backend can
+  attach photos to their report. When identical bytes appear in a second message, no bytes are
+  re-uploaded, but `media/complete` is still sent so the existing R2 object is linked to that message too.
+
+> **Physical-device verification required.** Viber's notification layout is not a public API. The
+> parser handles it through the standard Android extras, but run the Viber acceptance test below on
+> the dedicated phone before relying on it.
+
+### Backend: processing and statuses
+
+Every new message gets exactly **one report record** (one message = one report, however many
+locations it lists). Processing runs in the background (bounded concurrency) right after the upload
+is acknowledged, so the phone never waits for AI.
+
+| Status | Meaning |
+|---|---|
+| `received` | Stored, not processed yet (also: waiting because AI is not configured) |
+| `processing` | Extraction running (recovered to `received` after a restart, never left stuck) |
+| `extracted` | Processed; nothing missing, ambiguous or flagged (still needs human approval) |
+| `needs_review` | Processed successfully, but a human must look: missing/ambiguous fields, warnings, low confidence, caption-less media |
+| `approved` / `rejected` | Human decision |
+| `ignored` | Not a flood report: system notification, greeting, unrelated message, unsupported source |
+| `failed` | Processing itself failed (AI unavailable after retries, malformed AI output after retries, storage error) |
+
+Report types: `flood_monitoring`, `flood_prone_area_assessment`, `non_flood_prone_area_assessment`,
+`other_flood_report`, `not_flood_report`. The group name is context only. A message is never
+classified as a report because of its group's name.
+
+### How extraction avoids guessing
+
+1. **The AI only locates text.** It returns, for every field, the verbatim source text (`raw`) and a
+   status: `provided`, `missing`, `not_applicable` (explicit "N/A"), or `ambiguous`. The prompt
+   (`lib/flood/prompt.js`) forbids filling one field from another (rainfall start ≠ flood start,
+   current ≠ maximum height), inferring coordinates/dates/municipalities, or estimating from photos.
+   The AI is **not given** the message's received time, so it has nothing to infer a date from.
+2. **Strict structured output.** The answer must match a closed JSON schema (`lib/flood/schema.js`) and
+   is validated again locally; malformed or invalid output is retried (bounded) and then `failed`.
+   Unvalidated AI output is never stored.
+3. **Code normalizes, not the AI** (`lib/flood/normalize.js`). Heights → meters (`0.20 m`, `20 cm`,
+   `200 mm` → `0.2`), times → `HH:mm`, dates → `YYYY-MM-DD`, coordinates → decimal degrees, rainfall
+   intensity → `none | light | light_to_moderate | moderate | moderate_to_heavy | heavy | …`.
+   Anything not confidently interpretable becomes `value: null, status: "ambiguous"` with the raw text
+   and a reason: e.g. `".010 m"` (`SUSPICIOUS_MEASUREMENT`), `"2:00"` without AM/PM, `10/04/2026`
+   (MM/DD vs DD/MM), a height without a unit, a date without a year.
+4. **Anti-fabrication rules.** A value whose text does not appear in the original message is discarded
+   (`VALUE_NOT_IN_SOURCE`). If one piece of source text was used for more fields than it appears
+   in the message (e.g. "2:00 PM" stated once, given as both rainfall start and flood start), those
+   values are discarded for review (`SOURCE_TEXT_REUSED`).
+5. **Derived values are labelled.** `interventionType` (keyword match on the intervention text) has
+   `origin: "system_derived"`. A photo is tied to a location only when the report has exactly one
+   location (`locationAssociationBasis: "single_location_report"`). Otherwise it stays on the report.
+
+Every normalized field has the shape:
+
+```json
+{ "value": "15:30", "status": "provided", "raw": "3:30 PM", "origin": "source" }
+{ "value": null, "status": "missing", "raw": null, "origin": "source" }
+{ "value": null, "status": "ambiguous", "raw": ".010 m", "origin": "source", "reason": "SUSPICIOUS_MEASUREMENT" }
+```
+
+`extractionMeta` lists `missingFields`, `ambiguousFields`, `notApplicableFields` (as paths such as
+`locations[0].flood.floodStartedAt`), `warnings`, confidence, model, prompt/schema version and timing.
+
+### Report structure
+
+```
+report
+├── source        immutable snapshot of the original message: platform, messageId, deviceId,
+│                 groupName, senderName, groupId/senderId (null), messageText, timestamps, sourcePackage
+├── classification  reportType, confidence, basis (ai | deterministic), rationale
+├── extraction
+│   ├── reportTitle, remarks
+│   ├── reporting       reportDate, reportTime, inspectionDate, inspectionTime
+│   ├── administrative  region, districtEngineeringOffice, province, municipality, barangay
+│   ├── preparedBy      name, position, office
+│   └── locations[]     rawLocationText, roadName, kilometerReference, landmark, barangay,
+│                       municipality, province, latitude, longitude, roadStatus, remarks,
+│                       flood{currentFloodHeight, floodHeightBefore, floodHeightAfter, maximumFloodHeight,
+│                             maximumFloodHeightTime, floodStartedAt, floodSubsidedAt},
+│                       rainfall{rainfallStartedAt, rainfallEndedAt, rainfallIntensity},
+│                       intervention{interventionText, interventionType (system-derived)}
+├── extractionMeta, processing (attempts, lastError, history), review (history, linkedMessageIds)
+├── media[]          existing Phase 2 objects (R2 key / remoteRef) linked to the message — never re-uploaded
+├── mediaIndicators[] what the notification said about media, even when no file could be acquired
+├── mediaSuggestions[] caption-less photos from the same sender within 15 min (suggestions only)
+└── logs[]           processing log entries (no message bodies, no credentials)
+```
+
+### Flood-report API
+
+All endpoints require `Authorization: Bearer <token>`: an `OKB_ADMIN_TOKENS` token when configured,
+otherwise a device token (same as the existing operator-verification endpoints).
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/v1/reports?status=&platform=&reportType=&includeIgnored=1&limit=50` | List (ignored records hidden by default) |
+| `GET` | `/api/v1/reports/:id` | Full report: source, extraction, metadata, media, logs |
+| `POST` | `/api/v1/reports/process` `{"messageId": "…"}` | Process one message now. Idempotent: an already processed message is returned as-is (`alreadyProcessed: true`) |
+| `POST` | `/api/v1/reports/:id/retry` `{"force": false}` | Re-extract the **same** report (no duplicates). Reviewed reports need `force: true`; a run already in progress returns 409 |
+| `POST` | `/api/v1/reports/:id/review` | `{"action": "approve" \| "reject" \| "reopen" \| "link_media", "reviewer": "…", "notes": "…", "messageIds": [...]}` |
+
+`link_media` attaches caption-less photo messages (same platform and group) to a report after a human
+has checked them. Media is never attached to a report automatically by guesswork.
+
+Messages stored **before** Phase 3 was deployed are not processed automatically, so old history does
+not trigger a burst of AI calls. To extract one, call `POST /api/v1/reports/process` with its
+`messageId` (ids are listed by `GET /api/v1/messages`).
+
+Processing logs (`DATA_DIR/processing-logs.jsonl`) record `received`, `processing_started`,
+`classification_completed`, `extraction_completed`, `validation_completed`, `report_saved`,
+`needs_review`, `retry_requested`, `ai_failed`, `failed`, `reviewed`, `recovered_after_restart`.
+Reports are stored in `DATA_DIR/reports.jsonl` (append-only; the last line for an id wins), following
+the existing JSON/JSONL storage convention of the reference backend.
+
+### Configure AI (server-side only)
+
+Add to `backend/.env` (see `.env.example`). The key never reaches the phone:
+
+```
+AI_API_KEY=your-anthropic-api-key
+# AI_BASE_URL=https://api.anthropic.com
+# AI_MODEL=claude-opus-5-5
+# AI_TIMEOUT_MS=120000
+# AI_MAX_RETRIES=2
+OKB_ADMIN_TOKENS=a-separate-long-random-operator-token
+```
+
+The client (`lib/ai.js`) calls the Claude Messages API with structured JSON output. Timeouts, 429
+(honouring `retry-after`), 5xx/overload and malformed output are retried at most `AI_MAX_RETRIES`
+times with exponential backoff; authentication and bad-request errors are not retried. Without
+`AI_API_KEY`, everything else keeps working: messages and media are stored, system notifications and
+greetings are filtered, and other reports wait in `received` until AI is configured (they are queued
+automatically on the next start). `GET /api/v1/health` reports `"reports": {"ai": "configured"}`.
+
+### Phase 3 acceptance test (physical device)
+
+1. **WhatsApp report.** Post a flood report in an authorized WhatsApp group from a second phone.
+   `GET /api/v1/reports` shows it (`platform: whatsapp`); the detail shows the original text and
+   structured fields; fields the report omits are `null` with status `missing`.
+2. **Viber report.** Install Viber on the bridge phone, join the group, keep its notifications on and
+   the group unmuted, and authorize the group name in **Groups**. Post the same kind of report in
+   Viber. Expect the message in **Messages** labelled "Viber", and a report with `platform: viber`.
+3. **Same text on both.** Post identical text in the WhatsApp and Viber groups. Expect two messages
+   and two reports.
+4. **Caption-less photo.** Send a photo without caption after a report. Expect a `needs_review` record
+   with `MEDIA_WITHOUT_TEXT`, and the photo listed under the report's `mediaSuggestions`.
+5. **System notifications.** Missed Viber/WhatsApp calls and "N new messages" summaries must not appear
+   as reports (`?status=ignored` shows any that reached the backend).
+
+> Do not claim these passed until executed on the physical device.
+
 ## Known limitations
 
 - The bridge only sees what WhatsApp puts in its notifications. Messages in muted groups, in a chat
@@ -627,3 +822,14 @@ curl -H "Authorization: Bearer <token>" "http://<server-ip>:8080/api/v1/media?li
   Access after system updates. The app reports this but cannot override it.
 - Message timestamps come from WhatsApp's notification data. If the notification carries no
   per-message time, the notification time is used.
+- **Viber** is captured only through its notifications, with the same limits as WhatsApp (muted
+  groups, open chats and suppressed notifications are invisible). Viber's notification layout is not a
+  public API and has not yet been verified on the physical device. Media files are usually unavailable.
+  Group and sender ids are not exposed by Android notifications and are stored as `null`.
+- Group authorization is by name and shared across WhatsApp and Viber.
+- Flood-report extraction depends on the configured AI and the report wording. Its output is a draft
+  for human review, never auto-approved. The automated tests verify the pipeline around the AI
+  (validation, normalization, anti-fabrication rules, statuses) with a fake AI. Extraction quality
+  on real DPWH reports should be checked against sample reports before relying on it.
+- Media objects keep the Phase 2 key prefix `whatsapp/…` for both platforms. Provenance comes from
+  the message record, not the object key.

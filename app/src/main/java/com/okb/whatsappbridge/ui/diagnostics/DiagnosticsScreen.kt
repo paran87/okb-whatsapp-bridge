@@ -69,6 +69,8 @@ fun DiagnosticsScreen(
                 )
                 val wa = StatusPresentation.whatsApp(system?.installedWhatsAppPackages, settings.lastNotificationAt)
                 StatusLine("WhatsApp", wa.level, wa.label, wa.detail)
+                val viber = StatusPresentation.viber(system?.installedViberPackages)
+                StatusLine("Viber", viber.level, viber.label, viber.detail)
                 val db = StatusPresentation.database(state.polled.databaseHealthy)
                 StatusLine("Room Database", db.level, if (db.level == StatusLevel.OK) "Healthy" else db.label, db.detail)
                 StatusLine(

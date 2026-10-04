@@ -48,6 +48,11 @@ data class MessageUploadRequest(
     val mediaStatus: String,
     val sourcePackage: String,
     val capturedAt: String,
+    /**
+     * Messaging platform (`whatsapp` / `viber`), derived from [sourcePackage]. Older backends ignore it;
+     * the Phase 3 backend uses it as provenance and to keep platforms from deduplicating against each other.
+     */
+    val platform: String?,
 )
 
 @Serializable
