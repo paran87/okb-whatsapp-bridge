@@ -118,6 +118,42 @@ fun DiagnosticsScreen(
         }
 
         item {
+            Panel(title = "Media") {
+                val m = state.mediaCounts
+                StatusLine(
+                    "Media acquisition capability",
+                    if (state.polled.mediaAcquisitionSupported) StatusLevel.OK else StatusLevel.WARNING,
+                    if (state.polled.mediaAcquisitionSupported) "Available" else "Unavailable",
+                    "Acquires media only from notification-provided URIs.",
+                )
+                StatusLine(
+                    "Media permissions",
+                    StatusLevel.OK,
+                    "None required",
+                    "No storage permission is used; WhatsApp's private files are never read.",
+                )
+                StatusLine(
+                    "Media capture",
+                    if (state.settings.captureMedia) StatusLevel.OK else StatusLevel.NEUTRAL,
+                    if (state.settings.captureMedia) "Enabled" else "Disabled",
+                )
+                KeyValueLine("Available (file acquired)", m.available.toString())
+                KeyValueLine("Unavailable (no file provided)", m.unavailable.toString())
+                KeyValueLine("Pending media uploads", m.pendingUploadTotal.toString())
+                KeyValueLine("Uploaded media", m.uploaded.toString())
+                KeyValueLine("Failed media", m.uploadFailed.toString())
+                KeyValueLine("Local storage used", Formatters.bytes(state.polled.mediaStorageUsedBytes))
+                KeyValueLine("Largest queued file", Formatters.bytes(state.polled.mediaLargestQueuedBytes))
+                KeyValueLine("Free space", Formatters.bytes(state.polled.mediaUsableSpaceBytes))
+                KeyValueLine("Last media capture", Formatters.time(state.settings.lastMediaCaptureAt))
+                KeyValueLine("Last media upload", Formatters.time(state.settings.lastMediaUploadAt))
+                state.settings.lastMediaError?.let {
+                    Text("Last media error: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
+
+        item {
             Panel(title = "Actions") {
                 ButtonRow {
                     Button(onClick = onTestBackend, enabled = !busy && settings.backendConfigured) { Text("Test Backend") }

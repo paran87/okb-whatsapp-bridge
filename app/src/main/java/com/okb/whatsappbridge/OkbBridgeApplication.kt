@@ -21,6 +21,7 @@ class OkbBridgeApplication : Application(), Configuration.Provider {
             .setWorkerFactory(
                 BridgeWorkerFactory(
                     sync = { container.syncMessages },
+                    mediaSync = { container.syncMedia },
                     healthCheck = { container.healthCheck },
                     logger = { container.logger },
                 ),

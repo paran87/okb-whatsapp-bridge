@@ -424,6 +424,184 @@ Android job runs `./gradlew assembleDebug test lint` on JDK 21 and uploads the d
 reports, lint report and rendered screenshots as artifacts. The backend job runs `npm test` on
 Node 20.
 
+## Phase 2 — WhatsApp media acquisition + Cloudflare R2
+
+Phase 2 extends the bridge so that when an authorized group notification indicates a photo, video,
+document, audio or sticker, the system records a **media attachment**, acquires the original file
+**only when Android legitimately provides it**, stores it locally, hashes it, and uploads it to the
+OKB backend, which stores it in Cloudflare R2. Phase 1 text/caption capture is unchanged and never
+depends on media.
+
+### What the notification actually contains (important)
+
+A WhatsApp notification does **not** contain the original photo/video file. The only legitimate
+original-media reference a notification can carry is a content URI set by the sender app via
+`MessagingStyle.Message.setData(mimeType, uri)` (`getDataUri()` / `getDataMimeType()`). WhatsApp
+**rarely populates this for group media**, and even when present the URI may not be readable by a
+notification listener. Notification icons and `BigPicture` thumbnails are **not** the original media
+and are never uploaded as such.
+
+Therefore the realistic outcome on most devices is a clean **media-unavailable** state. The bridge:
+
+- reads **only** a legitimately-provided `dataUri` through the public `ContentResolver`;
+- **never** reads WhatsApp's private storage, scrapes WhatsApp Web, automates the UI, uses an
+  `AccessibilityService`, or requires root;
+- requests **no storage permission** (the primary strategy needs none);
+- when no legitimate file is available, records `acquisitionStatus = UNAVAILABLE` with an
+  operator-readable reason, keeps the text/caption, and does not invent a workaround.
+
+> This is a deliberate architecture: media acquisition can be improved later (e.g. a future
+> MediaStore-based strategy on devices that expose shared media) without changing the database,
+> queue or backend contract.
+
+### Media pipeline
+
+```
+Authorized group notification (media indicator)
+      ↓
+MediaAttachment row (DETECTED)
+      ↓
+Acquire ONLY a legitimately-provided notification URI  ──► none ──► UNAVAILABLE (text still kept)
+      ↓ (file provided)
+Stream-copy into app storage + SHA-256 (one pass, bounded memory)   → AVAILABLE
+      ↓
+Persistent media upload queue (WorkManager)
+      ↓
+media/intent (authenticated)  ──► duplicate ──► mark UPLOADED (no transfer)
+      ↓ (upload URL)
+Stream PUT to the URL (presigned R2, or dev local-sink)
+      ↓
+media/complete  → mark UPLOADED (R2 object key + ETag recorded)
+      ↓
+Cloudflare R2 object
+```
+
+### Backend media architecture: presigned direct-to-R2 (chosen)
+
+Two approaches were evaluated:
+
+| | A. Backend proxies bytes | **B. Presigned direct-to-R2 (chosen)** |
+|---|---|---|
+| R2 credentials | on backend only | on backend only |
+| Android memory for large video | backend must stream too | device streams file from disk; backend untouched |
+| Large video support | limited by backend resources | up to R2's 5 GiB single-PUT (multipart later) |
+| Retry | re-send through backend | re-intent + re-PUT, idempotent on a content-addressed key |
+| Security | token to backend | short-lived, key- and content-type-scoped URL; **no R2 keys on device** |
+| Complexity | higher backend load | small SigV4 presigner |
+
+**B** is used. The device authenticates to the OKB backend (same device-token auth as Phase 1),
+calls `media/intent`, receives a **short-lived, key-scoped** upload URL, streams the file straight to
+R2, then calls `media/complete`. **R2 Access Key / Secret never reach the APK.**
+
+In development (no R2 configured) the backend returns a **signed local-sink URL on itself** so the
+entire pipeline is testable without any R2 credentials. The Android contract is identical either way.
+
+Multipart upload is not implemented in this phase (a single streamed PUT covers WhatsApp media sizes
+well under R2's 5 GiB single-PUT limit); the upload is behind a `MediaUploader` abstraction so
+multipart can be added later without touching the database or queue.
+
+### New media API endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/media/intent` | Get an upload URL (presigned R2 or dev local-sink), or a `duplicate` verdict |
+| `PUT` | the returned `uploadUrl` | Stream the file bytes (presigned R2, or dev `/api/v1/media/blob`) |
+| `POST` | `/api/v1/media/complete` | Confirm the object; record R2 key + ETag |
+| `GET` | `/api/v1/media/:id` | Media metadata |
+| `GET` | `/api/v1/media?limit=50` | Operator verification list |
+
+All Phase 1 message endpoints are unchanged and remain backward compatible.
+
+The object key is deterministic and content-addressed (no secrets):
+
+```
+whatsapp/{deviceId}/{yyyy}/{MM}/{dd}/{sha256}.{ext}
+```
+
+Deduplication happens at three levels: locally (reuse an already-uploaded row with the same SHA-256),
+at `intent` (the backend reports `duplicate` for a known object key), and implicitly at R2 (same
+content → same key → same object).
+
+### Configure Cloudflare R2 (exact steps)
+
+1. In the Cloudflare dashboard, open **R2** and **Create bucket** (e.g. `okb-media`). Keep it
+   **private** (do not enable public access).
+2. Note your **Account ID** (R2 → Overview, or the dashboard URL).
+3. **R2 → Manage R2 API Tokens → Create API token**:
+   - Permission: **Object Read & Write** (the minimum this app needs);
+   - scope it to the single bucket (`okb-media`);
+   - create it and copy the **Access Key ID** and **Secret Access Key** (shown once).
+4. On the backend host, copy `backend/.env.example` to `backend/.env` and fill in:
+   ```
+   R2_ACCOUNT_ID=your-account-id
+   R2_BUCKET_NAME=okb-media
+   R2_ACCESS_KEY_ID=your-access-key-id
+   R2_SECRET_ACCESS_KEY=your-secret-access-key
+   OKB_DEVICE_TOKENS=your-long-random-device-token
+   ```
+   Never commit `.env`. The device token is stored encrypted on the phone (Android Keystore).
+5. Start the backend: `cd backend && node --env-file=.env server.js` (Node ≥ 20; on Node 18 export
+   the vars instead). `GET /api/v1/health` reports `"media":"r2"` when R2 is active, or
+   `"media":"local-sink"` in development.
+
+With R2 unset, the backend runs the **DEV local-sink** (stores media under `DATA_DIR/media`) so you
+can test end-to-end before configuring R2. `OKB_ALLOW_NO_AUTH=1` remains **DEVELOPMENT ONLY**.
+
+### Install the updated APK
+
+Same as Phase 1:
+
+```
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+The database migrates in place (v1 → v2); existing messages, groups and settings are preserved. No
+new permission prompt appears on install — media acquisition uses no storage permission. Android may
+show a brief "Uploading media…" notification while a large upload runs (a foreground data-sync task).
+
+### Media settings and screens
+
+- **Settings → Media Capture**: toggle media capture on/off, and "delete local copy after upload"
+  (a local file is deleted only *after* a confirmed upload; otherwise kept 30 days).
+- **Dashboard**: Media Today, Pending Media Uploads, Uploaded Media, Failed Media, Storage Used,
+  Last Media Capture, Last Media Upload, plus a Media Worker status line.
+- **Messages**: each message shows a media chip (`IMAGE`, `VIDEO`, `… · UNAVAILABLE`, etc.); tap a
+  message to open the **media detail** screen (group, sender, caption, media type, file size,
+  acquisition status, upload status, SHA-256, R2 object key, timestamps, last error). A preview is
+  only ever shown when an accessible local file exists — never a fake preview.
+- **Sync**: media queue counts and **Sync media now** / **Retry failed media**.
+- **Diagnostics → Media**: acquisition capability, media permissions (none required), storage used,
+  largest queued file, free space, last capture/upload, with plain-language explanations such as
+  "Media detected, but Android did not provide an accessible media file."
+
+### Phase 2 acceptance-test procedure (physical device)
+
+Run on the dedicated phone with a second phone sending to an authorized group. Start the backend
+(local-sink is fine for testing) and watch it plus logcat:
+
+```
+adb logcat -s OKB/Media OKB/MediaSync OKB/Capture OKB/Listener
+curl -H "Authorization: Bearer <token>" "http://<server-ip>:8080/api/v1/media?limit=5"
+```
+
+1. **Text** — send "Phase 2 text test". Expect: captured, stored, uploaded; Phase 1 behavior intact.
+2. **Photo** — send one photo. Expect: notification detected, media type `IMAGE`, caption preserved.
+   If Android provides a legitimate URI → local file created, SHA-256 computed, queued, uploaded to
+   R2/local-sink. If not → `mediaStatus = UNAVAILABLE` with a clear reason; text/caption still
+   captured. (On most devices the latter is expected — this is correct, not a bug.)
+3. **Photo with caption** — "Flooding observed at bridge" + photo. Expect: media record and caption
+   linked to the same message; no text lost.
+4. **Video** — short video. Expect: detected; if acquirable, streamed without a memory crash, queued,
+   upload/retry works.
+5. **App closed** — swipe the app away, lock the phone, send a photo. Expect: the listener captures
+   it and media processing + upload happen in the background.
+6. **Offline** — stop the backend, send a photo. Expect: media stays queued (`Pending`/`Retrying`),
+   no data loss. Restart the backend → WorkManager retries → uploaded.
+7. **Duplicate** — send the exact same media twice. Expect: SHA-256 detects the duplicate; R2 does
+   not store a second object (intent returns `duplicate`).
+
+> Do not claim any of these passed until executed on the physical device.
+
 ## Known limitations
 
 - The bridge only sees what WhatsApp puts in its notifications. Messages in muted groups, in a chat
@@ -437,6 +615,13 @@ Node 20.
   Two different groups with the same name cannot be distinguished.
 - Media files (photos, video, audio, documents) are not extracted in phase 1. Only their type and
   text/caption are captured (`mediaStatus = UNAVAILABLE`).
+- **Media files are usually not acquirable.** WhatsApp does not attach the original photo/video to
+  group notifications, so on most devices media is recorded as `UNAVAILABLE` (type + caption only).
+  The bridge only acquires media Android legitimately hands it via a notification URI; it never reads
+  WhatsApp's private storage. A future phase may add a MediaStore-based strategy where the OS exposes
+  shared media.
+- Multipart/resumable upload is not implemented yet; a single streamed PUT is used (ample for
+  WhatsApp media sizes). The `MediaUploader` abstraction allows adding multipart later.
 - After a reboot, the phone must be unlocked once before monitoring resumes (Android Direct Boot).
   Some manufacturers may additionally require auto-start permission or may revoke Notification
   Access after system updates. The app reports this but cannot override it.

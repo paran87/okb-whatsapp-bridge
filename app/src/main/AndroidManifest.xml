@@ -7,6 +7,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Used only to alert the operator when background monitoring appears inactive. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Lets large media uploads run as a foreground data-sync task so Android does not kill them. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <!-- Package visibility (Android 11+): needed to detect whether WhatsApp is installed. -->
     <queries>
@@ -63,6 +66,12 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <!-- Large media uploads run as a long-running (foreground) data-sync worker. -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
 
         <!-- WorkManager is initialised on demand with our own WorkerFactory. -->
         <provider

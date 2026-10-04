@@ -27,6 +27,9 @@ data class NewCapturedMessage(
 
 enum class SaveResult { INSERTED, DUPLICATE }
 
+/** Result of persisting a captured message, carrying the new row id when inserted. */
+data class SaveOutcome(val result: SaveResult, val messageId: String?)
+
 /** A queued message selected for upload. */
 data class UploadCandidate(
     val id: String,
@@ -44,8 +47,9 @@ data class UploadCandidate(
 )
 
 interface MessageRepository {
-    suspend fun saveCaptured(message: NewCapturedMessage): SaveResult
+    suspend fun saveCaptured(message: NewCapturedMessage): SaveOutcome
     fun observeRecent(status: UploadStatus?, limit: Int): Flow<List<BridgeMessage>>
+    fun observeById(id: String): Flow<BridgeMessage?>
     fun observeQueueCounts(): Flow<QueueCounts>
     fun observeCapturedSince(since: Long): Flow<Int>
     fun observeLatestMessageTimestamp(): Flow<Long?>
@@ -97,6 +101,11 @@ interface SettingsRepository {
     suspend fun recordBackendCheck(at: Long, ok: Boolean, message: String)
     suspend fun recordHealthCheck(at: Long)
     suspend fun recordBoot(at: Long)
+    suspend fun setCaptureMedia(enabled: Boolean)
+    suspend fun setDeleteLocalAfterUpload(enabled: Boolean)
+    suspend fun recordMediaCapture(at: Long)
+    suspend fun recordMediaUploadSuccess(at: Long)
+    suspend fun recordMediaFailure(at: Long, error: String)
 }
 
 /** Device identity and credentials. Backed by Android Keystore encryption. */
@@ -115,8 +124,10 @@ interface LogRepository {
 
 /** Abstraction over WorkManager so the capture pipeline can be tested without it. */
 interface UploadScheduler {
-    /** Queues a (network-constrained) one-time upload. */
+    /** Queues a (network-constrained) one-time message upload. */
     fun requestUpload(trigger: SyncTrigger = SyncTrigger.IMMEDIATE)
+    /** Queues a (network-constrained) one-time media upload. */
+    fun requestMediaUpload(trigger: SyncTrigger = SyncTrigger.IMMEDIATE)
     /** Ensures the 15-minute reconciliation / health-check work is scheduled. */
     fun ensurePeriodicReconciliation()
 }

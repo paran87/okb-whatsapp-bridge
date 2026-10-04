@@ -14,6 +14,9 @@ data class ParsedMessage(
     val timestampSource: TimestampSource,
     val mediaType: MediaType,
     val mediaStatus: MediaStatus,
+    /** Legitimate media content URI from the notification, if any (usually null). */
+    val dataUri: String? = null,
+    val dataMimeType: String? = null,
 )
 
 data class ParsedNotification(
@@ -120,7 +123,10 @@ class WhatsAppNotificationParser(
             }
             // A preview picture belongs to the most recent message only.
             val media = mediaDetector.detect(body, hasPicture = s.hasPicture && index == lastIndex)
-            ParsedMessage(sender, body, timestamp, source, media, mediaDetector.statusFor(media))
+            ParsedMessage(
+                sender, body, timestamp, source, media, mediaDetector.statusFor(media),
+                dataUri = m.dataUri, dataMimeType = m.dataMimeType,
+            )
         }
     }
 

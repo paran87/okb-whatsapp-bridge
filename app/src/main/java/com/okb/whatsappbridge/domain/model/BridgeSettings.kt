@@ -24,6 +24,12 @@ data class BridgeSettings(
     val lastBackendCheckMessage: String? = null,
     val lastHealthCheckAt: Long? = null,
     val lastBootAt: Long? = null,
+    // Phase 2 (media)
+    val captureMedia: Boolean = true,
+    val deleteLocalAfterUpload: Boolean = true,
+    val lastMediaCaptureAt: Long? = null,
+    val lastMediaUploadAt: Long? = null,
+    val lastMediaError: String? = null,
 ) {
     val backendConfigured: Boolean get() = backendUrl.isNotBlank()
 }
@@ -47,4 +53,9 @@ object SettingKeys {
     const val LAST_BACKEND_CHECK_MESSAGE = "last_backend_check_message"
     const val LAST_HEALTH_CHECK_AT = "last_health_check_at"
     const val LAST_BOOT_AT = "last_boot_at"
+    const val CAPTURE_MEDIA = "capture_media"
+    const val DELETE_LOCAL_AFTER_UPLOAD = "delete_local_after_upload"
+    const val LAST_MEDIA_CAPTURE_AT = "last_media_capture_at"
+    const val LAST_MEDIA_UPLOAD_AT = "last_media_upload_at"
+    const val LAST_MEDIA_ERROR = "last_media_error"
 }

@@ -47,6 +47,14 @@ abstract class MessageDao {
     @Query(
         """
         SELECT m.*, COALESCE(q.attemptCount, 0) AS attemptCount
+        FROM messages m LEFT JOIN upload_queue q ON q.messageId = m.id WHERE m.id = :id
+        """,
+    )
+    abstract fun observeById(id: String): kotlinx.coroutines.flow.Flow<MessageWithQueue?>
+
+    @Query(
+        """
+        SELECT m.*, COALESCE(q.attemptCount, 0) AS attemptCount
         FROM messages m LEFT JOIN upload_queue q ON q.messageId = m.id
         WHERE (:status IS NULL OR m.uploadStatus = :status)
         ORDER BY m.timestamp DESC, m.createdAt DESC

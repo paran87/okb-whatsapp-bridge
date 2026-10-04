@@ -57,6 +57,8 @@ import com.okb.whatsappbridge.ui.diagnostics.DiagnosticsScreen
 import com.okb.whatsappbridge.ui.diagnostics.LogsScreen
 import com.okb.whatsappbridge.ui.groups.GroupsScreen
 import com.okb.whatsappbridge.ui.groups.GroupsViewModel
+import com.okb.whatsappbridge.ui.messages.MediaDetailScreen
+import com.okb.whatsappbridge.ui.messages.MediaDetailViewModel
 import com.okb.whatsappbridge.ui.messages.MessagesScreen
 import com.okb.whatsappbridge.ui.messages.MessagesViewModel
 import com.okb.whatsappbridge.ui.settings.SettingsScreen
@@ -74,6 +76,7 @@ private enum class TopLevel(val route: String, val label: String, val icon: Imag
 
 private const val ROUTE_DIAGNOSTICS = "diagnostics"
 private const val ROUTE_LOGS = "logs"
+private const val ROUTE_MESSAGE_DETAIL = "message"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -155,7 +158,7 @@ fun BridgeApp(container: AppContainer) {
                                     when (currentRoute) {
                                         ROUTE_DIAGNOSTICS -> "Diagnostics"
                                         ROUTE_LOGS -> "Event log"
-                                        else -> topLevel?.label ?: ""
+                                        else -> if (currentRoute?.startsWith(ROUTE_MESSAGE_DETAIL) == true) "Message detail" else topLevel?.label ?: ""
                                     } + "  ·  " + state.polled.deviceId,
                                     style = MaterialTheme.typography.labelSmall,
                                     fontFamily = MonoFamily,
@@ -200,9 +203,16 @@ fun BridgeApp(container: AppContainer) {
                 }
                 composable(TopLevel.MESSAGES.route) {
                     val vm: MessagesViewModel = viewModel(
-                        factory = viewModelFactory { initializer { MessagesViewModel(container.messageRepository) } },
+                        factory = viewModelFactory { initializer { MessagesViewModel(container.messageRepository, container.mediaRepository) } },
                     )
-                    MessagesScreen(vm)
+                    MessagesScreen(vm, onOpenDetail = { id -> navController.navigate("$ROUTE_MESSAGE_DETAIL/$id") })
+                }
+                composable("$ROUTE_MESSAGE_DETAIL/{id}") { entry ->
+                    val id = entry.arguments?.getString("id").orEmpty()
+                    val vm: MediaDetailViewModel = viewModel(
+                        factory = viewModelFactory { initializer { MediaDetailViewModel(id, container.messageRepository, container.mediaRepository) } },
+                    )
+                    MediaDetailScreen(vm)
                 }
                 composable(TopLevel.GROUPS.route) {
                     val vm: GroupsViewModel = viewModel(
@@ -215,6 +225,8 @@ fun BridgeApp(container: AppContainer) {
                         state = state,
                         onSyncNow = statusViewModel::syncNow,
                         onRetryFailed = statusViewModel::retryFailed,
+                        onSyncMediaNow = statusViewModel::syncMediaNow,
+                        onRetryFailedMedia = statusViewModel::retryFailedMedia,
                         onSetSyncPaused = statusViewModel::setSyncPaused,
                     )
                 }
@@ -228,6 +240,8 @@ fun BridgeApp(container: AppContainer) {
                         onRegisterDevice = statusViewModel::registerDevice,
                         onTestBackend = statusViewModel::testBackend,
                         onSetSyncPaused = statusViewModel::setSyncPaused,
+                        onSetCaptureMedia = statusViewModel::setCaptureMedia,
+                        onSetDeleteLocalAfterUpload = statusViewModel::setDeleteLocalAfterUpload,
                         onOpenDiagnostics = { navController.navigate(ROUTE_DIAGNOSTICS) },
                         onRefresh = statusViewModel::refresh,
                     )

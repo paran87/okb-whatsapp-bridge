@@ -63,8 +63,8 @@ class MessageDaoTest {
 
     @Test
     fun `message and queue entry are stored atomically and duplicates are rejected`() = runTest {
-        assertEquals(SaveResult.INSERTED, repo.saveCaptured(message("Flood", 1000)))
-        assertEquals(SaveResult.DUPLICATE, repo.saveCaptured(message("Flood", 1000)))
+        assertEquals(SaveResult.INSERTED, repo.saveCaptured(message("Flood", 1000)).result)
+        assertEquals(SaveResult.DUPLICATE, repo.saveCaptured(message("Flood", 1000)).result)
         assertEquals(1, db.messageDao().countAll())
         assertEquals(1, db.uploadQueueDao().count())
         val stored = db.messageDao().getById("msg-1")!!

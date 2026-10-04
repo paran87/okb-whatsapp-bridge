@@ -13,6 +13,7 @@ import com.okb.whatsappbridge.domain.repository.DeviceIdentityRepository
 import com.okb.whatsappbridge.domain.repository.MessageRepository
 import com.okb.whatsappbridge.domain.repository.MessageRepository.Companion.MAX_AUTOMATIC_FAILED_ATTEMPTS
 import com.okb.whatsappbridge.domain.repository.NewCapturedMessage
+import com.okb.whatsappbridge.domain.repository.SaveOutcome
 import com.okb.whatsappbridge.domain.repository.SaveResult
 import com.okb.whatsappbridge.domain.repository.UploadCandidate
 import kotlinx.coroutines.flow.Flow
@@ -26,9 +27,10 @@ class RoomMessageRepository(
     private val idGenerator: () -> String = { UUID.randomUUID().toString() },
 ) : MessageRepository {
 
-    override suspend fun saveCaptured(message: NewCapturedMessage): SaveResult {
+    override suspend fun saveCaptured(message: NewCapturedMessage): SaveOutcome {
+        val id = idGenerator()
         val entity = WhatsAppMessageEntity(
-            id = idGenerator(),
+            id = id,
             serverId = null,
             deviceId = identity.deviceId(),
             groupName = message.groupName,
@@ -43,11 +45,15 @@ class RoomMessageRepository(
             packageName = message.packageName,
             notificationKey = message.notificationKey,
         )
-        return if (dao.insertCaptured(entity, enqueuedAt = message.capturedAt)) SaveResult.INSERTED else SaveResult.DUPLICATE
+        return if (dao.insertCaptured(entity, enqueuedAt = message.capturedAt)) SaveOutcome(SaveResult.INSERTED, id)
+        else SaveOutcome(SaveResult.DUPLICATE, null)
     }
 
     override fun observeRecent(status: UploadStatus?, limit: Int): Flow<List<BridgeMessage>> =
         dao.observeRecent(status?.name, limit).map { rows -> rows.map { it.toDomain() } }
+
+    override fun observeById(id: String): Flow<BridgeMessage?> =
+        dao.observeById(id).map { it?.toDomain() }
 
     override fun observeQueueCounts(): Flow<QueueCounts> = dao.observeStatusCounts().map { rows ->
         val byStatus = rows.associate { UploadStatus.fromStorage(it.status) to it.count }

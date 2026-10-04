@@ -11,6 +11,7 @@ import com.okb.whatsappbridge.domain.model.UploadStatus
 import com.okb.whatsappbridge.domain.repository.GroupRepository
 import com.okb.whatsappbridge.domain.repository.MessageRepository
 import com.okb.whatsappbridge.domain.repository.NewCapturedMessage
+import com.okb.whatsappbridge.domain.repository.SaveOutcome
 import com.okb.whatsappbridge.domain.repository.SaveResult
 import com.okb.whatsappbridge.domain.repository.SettingsRepository
 import com.okb.whatsappbridge.domain.repository.UploadCandidate
@@ -32,8 +33,10 @@ class RecordingLogger : BridgeLogger {
 
 class FakeScheduler : UploadScheduler {
     val requests = mutableListOf<SyncTrigger>()
+    val mediaRequests = mutableListOf<SyncTrigger>()
     var periodicEnsured = 0
     override fun requestUpload(trigger: SyncTrigger) { requests += trigger }
+    override fun requestMediaUpload(trigger: SyncTrigger) { mediaRequests += trigger }
     override fun ensurePeriodicReconciliation() { periodicEnsured++ }
 }
 
@@ -57,6 +60,11 @@ class FakeSettingsRepository(initial: BridgeSettings = BridgeSettings()) : Setti
         update { it.copy(lastBackendCheckAt = at, lastBackendCheckOk = ok, lastBackendCheckMessage = message) }
     override suspend fun recordHealthCheck(at: Long) = update { it.copy(lastHealthCheckAt = at) }
     override suspend fun recordBoot(at: Long) = update { it.copy(lastBootAt = at) }
+    override suspend fun setCaptureMedia(enabled: Boolean) = update { it.copy(captureMedia = enabled) }
+    override suspend fun setDeleteLocalAfterUpload(enabled: Boolean) = update { it.copy(deleteLocalAfterUpload = enabled) }
+    override suspend fun recordMediaCapture(at: Long) = update { it.copy(lastMediaCaptureAt = at) }
+    override suspend fun recordMediaUploadSuccess(at: Long) = update { it.copy(lastMediaUploadAt = at) }
+    override suspend fun recordMediaFailure(at: Long, error: String) = update { it.copy(lastMediaError = error) }
 }
 
 class FakeGroupRepository(vararg authorized: String) : GroupRepository {
@@ -88,14 +96,16 @@ class FakeGroupRepository(vararg authorized: String) : GroupRepository {
 /** Minimal in-memory message store used by pipeline tests that do not need Room. */
 class FakeMessageRepository : MessageRepository {
     val saved = mutableListOf<NewCapturedMessage>()
-    override suspend fun saveCaptured(message: NewCapturedMessage): SaveResult {
-        if (saved.any { it.fingerprint == message.fingerprint }) return SaveResult.DUPLICATE
+    private var seq = 0
+    override suspend fun saveCaptured(message: NewCapturedMessage): SaveOutcome {
+        if (saved.any { it.fingerprint == message.fingerprint }) return SaveOutcome(SaveResult.DUPLICATE, null)
         saved += message
-        return SaveResult.INSERTED
+        return SaveOutcome(SaveResult.INSERTED, "msg-${++seq}")
     }
     var uploadable = 0
     var repaired = 0
     override fun observeRecent(status: UploadStatus?, limit: Int): Flow<List<BridgeMessage>> = emptyFlow()
+    override fun observeById(id: String): Flow<BridgeMessage?> = emptyFlow()
     override fun observeQueueCounts(): Flow<QueueCounts> = emptyFlow()
     override fun observeCapturedSince(since: Long): Flow<Int> = emptyFlow()
     override fun observeLatestMessageTimestamp(): Flow<Long?> = emptyFlow()
