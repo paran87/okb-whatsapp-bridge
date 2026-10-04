@@ -36,7 +36,9 @@ class WhatsAppNotificationFilter(
         if (snapshot.isOngoing) return FilterDecision.Ignore(IgnoreReason.ONGOING)
         if (rules.isIgnoredCategory(snapshot.category)) return FilterDecision.Ignore(IgnoreReason.SYSTEM_CATEGORY)
 
-        val hasMessages = snapshot.messages.any { !it.text.isNullOrBlank() }
+        val hasMessages = snapshot.messages.any {
+            !it.text.isNullOrBlank() || !it.dataMimeType.isNullOrBlank() || !it.dataUri.isNullOrBlank()
+        }
         if (!hasMessages) {
             if (rules.isIgnoredTitle(snapshot.title) && snapshot.conversationTitle.isNullOrBlank()) {
                 return FilterDecision.Ignore(IgnoreReason.SYSTEM_NOTIFICATION)
