@@ -8,6 +8,7 @@ import com.okb.whatsappbridge.domain.model.MonitoringState
 import com.okb.whatsappbridge.domain.model.MediaCounts
 import com.okb.whatsappbridge.domain.model.QueueCounts
 import com.okb.whatsappbridge.domain.model.SystemStatus
+import com.okb.whatsappbridge.domain.usecase.ListenerRecoveryOutcome
 import com.okb.whatsappbridge.domain.usecase.SyncTrigger
 import com.okb.whatsappbridge.service.ListenerConnectionState
 import com.okb.whatsappbridge.ui.components.Formatters
@@ -166,9 +167,23 @@ class StatusViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             container.settingsRepository.setMonitoringEnabled(enabled)
             container.logger.info("Operator", if (enabled) "Background monitoring enabled" else "Background monitoring paused")
-            if (enabled && container.systemStatus.isNotificationAccessGranted() && !container.systemStatus.isListenerConnected()) {
-                container.systemStatus.requestListenerRebind()
-            }
+            container.ensureMonitoring(if (enabled) "monitoring enabled" else "monitoring paused")
+            refresh()
+        }
+    }
+
+    /** Operator pressed "Reconnect now". */
+    fun reconnectListener() {
+        viewModelScope.launch {
+            val outcome = container.listenerRecovery("operator request")
+            _events.emit(
+                when (outcome) {
+                    ListenerRecoveryOutcome.NO_ACCESS -> "Notification Access is not granted – enable it in Android Settings"
+                    ListenerRecoveryOutcome.ALREADY_CONNECTED, ListenerRecoveryOutcome.RECONNECTED -> "Notification listener connected"
+                    ListenerRecoveryOutcome.STILL_DISCONNECTED ->
+                        "Android has not reconnected yet. Switch OKB Bridge off and on in Notification Access."
+                },
+            )
             refresh()
         }
     }

@@ -49,6 +49,33 @@ object SystemSettingsIntents {
         ),
     )
 
+    /**
+     * Manufacturer "Autostart" / background-launch screen (Xiaomi, Redmi, POCO, Oppo, Realme, Vivo,
+     * Huawei, Honor). These phones kill or block apps that are not allowed to auto-start, independently of
+     * Android's own battery settings. Falls back to this app's details page.
+     */
+    fun openAutostartSettings(context: Context): Boolean {
+        val vendor = autostartComponents.filter { (brand, _) -> Build.MANUFACTURER.equals(brand, ignoreCase = true) }
+            .map { (_, component) -> Intent().setComponent(component) }
+        return startFirst(context, vendor + appDetails(context.packageName))
+    }
+
+    /** True on manufacturers known to have a separate Autostart permission. */
+    fun hasAutostartSettings(): Boolean = autostartComponents.any { (brand, _) -> Build.MANUFACTURER.equals(brand, ignoreCase = true) }
+
+    private val autostartComponents: List<Pair<String, ComponentName>> = listOf(
+        "xiaomi" to ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"),
+        "redmi" to ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"),
+        "poco" to ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"),
+        "oppo" to ComponentName("com.coloros.safecenter", "com.coloros.safecenter.startupapp.StartupAppListActivity"),
+        "oppo" to ComponentName("com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity"),
+        "realme" to ComponentName("com.coloros.safecenter", "com.coloros.safecenter.startupapp.StartupAppListActivity"),
+        "vivo" to ComponentName("com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity"),
+        "vivo" to ComponentName("com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.BgStartUpManager"),
+        "huawei" to ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"),
+        "honor" to ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"),
+    )
+
     private fun appDetails(packageName: String) =
         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null))
 

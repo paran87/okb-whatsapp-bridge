@@ -166,7 +166,13 @@ fun MetricTile(label: String, value: String, modifier: Modifier = Modifier, leve
 
 /** Prominent warning with an action, e.g. "⚠ Background monitoring may be inactive". */
 @Composable
-fun WarningBanner(text: String, actionLabel: String?, onAction: (() -> Unit)?, level: StatusLevel = StatusLevel.WARNING) {
+fun WarningBanner(
+    text: String,
+    actionLabel: String?,
+    onAction: (() -> Unit)?,
+    level: StatusLevel = StatusLevel.WARNING,
+    extraActions: List<Pair<String, () -> Unit>> = emptyList(),
+) {
     val color = level.color()
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -180,8 +186,11 @@ fun WarningBanner(text: String, actionLabel: String?, onAction: (() -> Unit)?, l
                 Spacer(Modifier.width(12.dp))
                 Text(text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
             }
-            if (actionLabel != null && onAction != null) {
-                ButtonRow { OutlinedButton(onClick = onAction) { Text(actionLabel) } }
+            if ((actionLabel != null && onAction != null) || extraActions.isNotEmpty()) {
+                ButtonRow {
+                    if (actionLabel != null && onAction != null) OutlinedButton(onClick = onAction) { Text(actionLabel) }
+                    extraActions.forEach { (label, action) -> OutlinedButton(onClick = action) { Text(label) } }
+                }
             }
         }
     }

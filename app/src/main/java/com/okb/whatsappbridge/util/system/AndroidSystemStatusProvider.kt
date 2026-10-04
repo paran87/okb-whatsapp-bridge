@@ -35,6 +35,16 @@ class AndroidSystemStatusProvider(private val context: Context) : SystemStatusPr
         false
     }
 
+    override fun resetListenerComponent(): Boolean = try {
+        val pm = context.packageManager
+        pm.setComponentEnabledSetting(listenerComponent, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
+        pm.setComponentEnabledSetting(listenerComponent, PackageManager.COMPONENT_ENABLED_STATE_DEFAULT, PackageManager.DONT_KILL_APP)
+        if (isNotificationAccessGranted()) NotificationListenerService.requestRebind(listenerComponent)
+        true
+    } catch (e: RuntimeException) {
+        false
+    }
+
     override fun snapshot(): SystemStatus {
         val power = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
         val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager

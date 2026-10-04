@@ -199,6 +199,7 @@ fun BridgeApp(container: AppContainer) {
                         onOpenGroups = { navigateTop(TopLevel.GROUPS) },
                         onOpenSettings = { navigateTop(TopLevel.SETTINGS) },
                         onOpenDiagnostics = { navController.navigate(ROUTE_DIAGNOSTICS) },
+                        onReconnectListener = statusViewModel::reconnectListener,
                     )
                 }
                 composable(TopLevel.MESSAGES.route) {

@@ -101,6 +101,30 @@ The status line reflects the actual system state, not just the switch position:
 | `● NOT RECEIVING` | Switch on, but Notification Access is missing |
 | `● WAITING FOR ANDROID` | Switch on and access granted, but Android has not (re)connected the listener |
 
+**Keeping it running when the app is closed.** While Background Monitoring is ON, the bridge shows a
+small ongoing notification, *"OKB Bridge is monitoring"*. It comes from a foreground service that does no
+work of its own. Its only job is to keep the bridge's process alive, so that swiping the app away from
+Recents does not kill the notification listener (Xiaomi/Redmi/POCO and other OEM builds kill background
+processes aggressively). You can minimise the notification under *App info → Notifications →
+Background monitoring*; monitoring keeps working. Turning Background Monitoring OFF removes it.
+
+**Automatic reconnection.** Whenever the bridge's process starts or the app is opened, it checks the
+listener. If Android has not reconnected it, the bridge asks Android to rebind. If that is not enough,
+it re-enables its own listener component, which makes Android bind it again. The dashboard shows
+"Reconnecting…" with a **Reconnect now** button while this happens. It normally takes a few seconds.
+
+**Force stop is different.** *App info → Force stop* (or a "kill"/"clear" button in some phones'
+Recents screen) puts the app into Android's *stopped* state. Android then blocks **everything** the app
+has (listener, foreground service, scheduled jobs, boot receiver) until the user opens it again. No
+app can work around this. Opening the app once is enough: it reconnects by itself. On the dedicated
+phone, do not force-stop the bridge, and on Xiaomi/Redmi/POCO lock it in Recents (pull the card down /
+tap the lock icon) so "clear all" leaves it alone.
+
+**Xiaomi / Redmi / POCO (MIUI, HyperOS), Oppo, Realme, Vivo, Huawei, Honor** have their own
+*Autostart* permission in addition to Android's battery settings. Allow it: **Settings → Battery
+Optimization → Autostart settings** in the bridge opens that screen. Also set *Battery saver → No
+restrictions* for the bridge.
+
 **After a reboot.** Android reconnects the listener by itself as long as Notification Access is
 still granted. Because of Android Direct Boot, the phone has to be **unlocked once** (PIN/pattern)
 after a restart before any app, including the bridge, can run. If Android ever revokes access

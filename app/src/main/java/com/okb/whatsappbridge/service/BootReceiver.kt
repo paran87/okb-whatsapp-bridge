@@ -32,7 +32,8 @@ class BootReceiver : BroadcastReceiver() {
                     container.uploadScheduler.requestMediaUpload(SyncTrigger.IMMEDIATE)
                 }
                 val access = container.systemStatus.isNotificationAccessGranted()
-                if (access && !container.systemStatus.isListenerConnected()) container.systemStatus.requestListenerRebind()
+                // Boot and app-update broadcasts may start the monitoring service; also reconnect the listener.
+                container.ensureMonitoring(reason)
                 container.logger.info("Boot", "Recovered after $reason; notification access granted=$access")
             } finally {
                 pending.finish()

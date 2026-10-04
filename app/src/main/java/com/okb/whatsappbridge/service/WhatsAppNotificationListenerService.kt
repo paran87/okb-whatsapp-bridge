@@ -26,7 +26,11 @@ class WhatsAppNotificationListenerService : NotificationListenerService() {
         val c = container
         c.logger.info(TAG, "Notification listener connected")
         c.healthAlerts.clear()
-        c.appScope.launch { c.settingsRepository.recordListenerConnected(System.currentTimeMillis()) }
+        c.appScope.launch {
+            c.settingsRepository.recordListenerConnected(System.currentTimeMillis())
+            // Best effort: keep the process alive from now on (Android may refuse while in the background).
+            if (c.settingsRepository.current().monitoringEnabled) MonitoringForegroundService.start(applicationContext)
+        }
 
         // Catch up on WhatsApp/Viber notifications still shown in the shade that were posted while the
         // listener was not bound (e.g. right after a reboot). Duplicates are rejected by fingerprint.

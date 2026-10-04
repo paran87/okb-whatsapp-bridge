@@ -10,6 +10,8 @@
     <!-- Lets large media uploads run as a foreground data-sync task so Android does not kill them. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Keeps the monitoring process alive while Background Monitoring is ON (see MonitoringForegroundService). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <!-- Package visibility (Android 11+): needed to detect whether WhatsApp / Viber are installed. -->
     <queries>
@@ -57,6 +59,19 @@
             <meta-data
                 android:name="android.service.notification.default_filter_types"
                 android:value="conversations|alerting" />
+        </service>
+
+        <!--
+            Holds an ongoing notification while Background Monitoring is ON so the process (and with it
+            the notification listener) is not killed when the app is swiped away. No work of its own.
+        -->
+        <service
+            android:name=".service.MonitoringForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the operator-enabled notification listener running so authorized group messages are captured while the app is closed." />
         </service>
 
         <receiver

@@ -17,10 +17,12 @@ import com.okb.whatsappbridge.domain.usecase.AcquireMediaUseCase
 import com.okb.whatsappbridge.domain.usecase.BackendUseCases
 import com.okb.whatsappbridge.domain.usecase.DeviceInfo
 import com.okb.whatsappbridge.domain.usecase.HealthCheckUseCase
+import com.okb.whatsappbridge.domain.usecase.ListenerRecoveryUseCase
 import com.okb.whatsappbridge.domain.usecase.ProcessNotificationUseCase
 import com.okb.whatsappbridge.domain.usecase.SyncMediaUseCase
 import com.okb.whatsappbridge.domain.usecase.SyncMessagesUseCase
 import com.okb.whatsappbridge.service.AndroidHealthAlertNotifier
+import com.okb.whatsappbridge.service.MonitoringForegroundService
 import com.okb.whatsappbridge.media.AndroidMediaContentAccess
 import com.okb.whatsappbridge.service.NotificationProcessor
 import com.okb.whatsappbridge.util.logging.BridgeLogger
@@ -32,6 +34,7 @@ import com.okb.whatsappbridge.worker.WorkManagerUploadScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * Manual dependency container, owned by the Application so it is available to the listener service,
@@ -86,10 +89,28 @@ class AppContainer(private val app: Application) {
     val syncMessages by lazy { SyncMessagesUseCase(settingsRepository, messageRepository, identity, api, logger) }
     val syncMedia by lazy { SyncMediaUseCase(settingsRepository, mediaRepository, identity, api, mediaUploader, logger) }
     val backend by lazy { BackendUseCases(settingsRepository, identity, api, deviceInfo, logger) }
+    val listenerRecovery by lazy { ListenerRecoveryUseCase(systemStatus, logger) }
     val healthCheck by lazy {
         HealthCheckUseCase(
             settingsRepository, messageRepository, systemStatus, uploadScheduler, backend, healthAlerts, logger,
             media = mediaRepository,
         )
+    }
+
+    /**
+     * Brings background monitoring back after the process was (re)started: keeps the process alive
+     * with the monitoring service while monitoring is ON, and reconnects the notification listener.
+     * Safe to call often; every step is idempotent.
+     */
+    fun ensureMonitoring(reason: String) {
+        appScope.launch {
+            val enabled = runCatching { settingsRepository.current().monitoringEnabled }.getOrDefault(false)
+            if (enabled) {
+                if (!MonitoringForegroundService.start(app)) logger.info("Monitor", "Monitoring service not started ($reason); Android does not allow it right now")
+            } else {
+                MonitoringForegroundService.stop(app)
+            }
+            runCatching { listenerRecovery(reason) }
+        }
     }
 }

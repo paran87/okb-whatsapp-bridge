@@ -120,13 +120,23 @@ fun SettingsScreen(
                 StatusLine("Status", battery.level, battery.label, battery.detail)
                 Text(
                     "For reliable background operation, configure the device so Android does not aggressively restrict " +
-                        "OKB WhatsApp Bridge: exempt it from battery optimization and set battery usage to Unrestricted.",
+                        "OKB WhatsApp Bridge: exempt it from battery optimization and set battery usage to Unrestricted." +
+                        if (SystemSettingsIntents.hasAutostartSettings()) {
+                            " This phone also has an Autostart permission: allow it, or the system may stop the bridge when it is closed."
+                        } else {
+                            ""
+                        },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 ButtonRow {
                     OutlinedButton(onClick = { SystemSettingsIntents.openAppDetails(context) }) { Text("App battery usage") }
                     Button(onClick = { SystemSettingsIntents.openBatteryOptimization(context) }) { Text("Open Battery Settings") }
+                }
+                if (SystemSettingsIntents.hasAutostartSettings()) {
+                    ButtonRow {
+                        Button(onClick = { SystemSettingsIntents.openAutostartSettings(context) }) { Text("Autostart settings") }
+                    }
                 }
             }
         }

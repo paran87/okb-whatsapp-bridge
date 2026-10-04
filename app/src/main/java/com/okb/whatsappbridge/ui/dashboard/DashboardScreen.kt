@@ -36,6 +36,7 @@ fun DashboardScreen(
     onOpenGroups: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenDiagnostics: () -> Unit,
+    onReconnectListener: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val settings = state.settings
@@ -57,7 +58,7 @@ fun DashboardScreen(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (state.loaded) warnings(state, context)
+        if (state.loaded) warnings(state, context, onReconnectListener)
 
         if (state.loaded && steps.any { !it.done }) {
             item(span = { GridItemSpan(maxLineSpan) }) { SetupChecklist(steps) }
@@ -144,17 +145,32 @@ fun DashboardScreen(
     }
 }
 
-private fun LazyGridScope.warnings(state: StatusUiState, context: android.content.Context) {
+private fun LazyGridScope.warnings(state: StatusUiState, context: android.content.Context, onReconnect: () -> Unit) {
     val monitoring = state.monitoringState
-    if (monitoring == MonitoringState.NO_ACCESS || monitoring == MonitoringState.LISTENER_DISCONNECTED) {
+    if (monitoring == MonitoringState.NO_ACCESS) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             WarningBanner(
-                text = "⚠ Background monitoring may be inactive. " +
-                    if (monitoring == MonitoringState.NO_ACCESS) "Notification Access is not enabled."
-                    else "Android has not connected the notification listener.",
+                text = "⚠ Background monitoring is inactive. Notification Access is not enabled.",
                 actionLabel = "Open Notification Access Settings",
                 onAction = { SystemSettingsIntents.openNotificationAccess(context) },
-                level = if (monitoring == MonitoringState.NO_ACCESS) StatusLevel.ERROR else StatusLevel.WARNING,
+                level = StatusLevel.ERROR,
+            )
+        }
+    }
+    if (monitoring == MonitoringState.LISTENER_DISCONNECTED) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            WarningBanner(
+                text = "⚠ Reconnecting the notification listener… This happens after the app was closed by the " +
+                    "system or force-stopped; it normally reconnects within a few seconds of opening the app. " +
+                    "If it stays here, switch OKB Bridge off and on in Notification Access." +
+                    if (SystemSettingsIntents.hasAutostartSettings()) " On this phone, also allow Autostart so it keeps running when closed." else "",
+                actionLabel = "Reconnect now",
+                onAction = onReconnect,
+                level = StatusLevel.WARNING,
+                extraActions = buildList {
+                    add("Notification Access" to { SystemSettingsIntents.openNotificationAccess(context) })
+                    if (SystemSettingsIntents.hasAutostartSettings()) add("Autostart" to { SystemSettingsIntents.openAutostartSettings(context) })
+                },
             )
         }
     }

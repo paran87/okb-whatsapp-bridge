@@ -27,4 +27,10 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        // In the foreground Android always allows starting the monitoring service.
+        (application as OkbBridgeApplication).container.ensureMonitoring("app opened")
+    }
 }

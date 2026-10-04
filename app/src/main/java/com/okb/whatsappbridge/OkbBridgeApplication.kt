@@ -14,6 +14,9 @@ class OkbBridgeApplication : Application(), Configuration.Provider {
         container = AppContainer(this)
         // Idempotent (KEEP): makes sure the 15-minute health check exists after install/update.
         container.uploadScheduler.ensurePeriodicReconciliation()
+        // The process was (re)started — e.g. the app was opened after being killed or force-stopped.
+        // Reconnect the listener now instead of waiting for the next 15-minute health check.
+        container.ensureMonitoring("process start")
     }
 
     override val workManagerConfiguration: Configuration

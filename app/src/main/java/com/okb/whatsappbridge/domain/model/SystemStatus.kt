@@ -50,4 +50,10 @@ interface SystemStatusProvider {
     fun isListenerConnected(): Boolean
     /** Asks Android to rebind the listener (supported API; it does not bypass user consent). */
     fun requestListenerRebind(): Boolean
+
+    /**
+     * Disables and re-enables the app's own listener component, which makes Android's notification
+     * service bind it again. Used only when [requestListenerRebind] did not help. Access stays as granted.
+     */
+    fun resetListenerComponent(): Boolean = false
 }

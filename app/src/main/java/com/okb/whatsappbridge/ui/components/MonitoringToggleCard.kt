@@ -58,8 +58,9 @@ fun MonitoringToggleCard(
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            "Monitors authorized WhatsApp groups while this app is closed, the screen is off or the phone is locked " +
-                "(subject to Android's background restrictions).",
+            "Monitors authorized WhatsApp and Viber groups while this app is closed, the screen is off or the phone is " +
+                "locked. A small \"OKB Bridge is monitoring\" notification keeps it running. Force stop always stops it " +
+                "until the app is opened again (an Android rule).",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
