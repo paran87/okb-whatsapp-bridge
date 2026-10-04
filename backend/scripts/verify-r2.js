@@ -17,6 +17,15 @@
 const crypto = require('node:crypto');
 const { createR2Client } = require('../lib/r2');
 
+// Dedicated test device id. MUST satisfy the backend's device contract (server.js DEVICE_ID):
+//   ^OKB-ANDROID-[0-9A-F]{6}$   (the 6 chars are HEX, so 'TEST00' is invalid).
+const TEST_DEVICE_ID = 'OKB-ANDROID-A82F19';
+const DEVICE_ID_RE = /^OKB-ANDROID-[0-9A-F]{6}$/; // mirrors server.js; keep in sync, never weaken it.
+if (!DEVICE_ID_RE.test(TEST_DEVICE_ID)) {
+  console.error(`TEST_DEVICE_ID ${TEST_DEVICE_ID} does not match the backend device contract ${DEVICE_ID_RE}`);
+  process.exit(2);
+}
+
 function arg(name) {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : undefined;
@@ -41,7 +50,7 @@ async function direct() {
   const body = Buffer.from(`okb r2 verify ${new Date().toISOString()}\n`);
   const sha = crypto.createHash('sha256').update(body).digest('hex');
   const d = new Date();
-  const key = `whatsapp/OKB-ANDROID-TEST00/${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${String(d.getUTCDate()).padStart(2, '0')}/${sha}.txt`;
+  const key = `whatsapp/${TEST_DEVICE_ID}/${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${String(d.getUTCDate()).padStart(2, '0')}/${sha}.txt`;
   const contentType = 'text/plain';
 
   const presigned = r2.presignPut(key, { contentType });
@@ -83,10 +92,18 @@ async function viaBackend(base) {
     process.exit(1);
   }
 
+  // Register the test device so the full device contract is exercised (media endpoints don't
+  // require prior registration, so a non-2xx here is not fatal — just informational).
+  const reg = await fetch(`${base}/api/v1/devices/register`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ deviceId: TEST_DEVICE_ID, deviceName: 'R2 verifier', platform: 'test' }),
+  });
+  console.log('Device register:', reg.status, (await reg.json().catch(() => ({}))).registered ? 'ok' : '');
+
   const body = Buffer.from(`okb r2 verify via backend ${Date.now()}\n`);
   const sha = crypto.createHash('sha256').update(body).digest('hex');
   const intentReq = {
-    deviceId: 'OKB-ANDROID-TEST00', sha256: sha, mediaType: 'DOCUMENT', mimeType: 'text/plain',
+    deviceId: TEST_DEVICE_ID, sha256: sha, mediaType: 'DOCUMENT', mimeType: 'text/plain',
     fileSizeBytes: body.length, originalFileName: 'verify.txt', groupName: 'verify',
     capturedAt: new Date().toISOString(), messageFingerprint: null,
   };

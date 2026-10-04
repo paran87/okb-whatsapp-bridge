@@ -553,7 +553,7 @@ cd backend
 npm run verify:r2
 ```
 
-It presigns a PUT and uploads a tiny test object directly to your bucket. `✅ R2 upload OK` means the
+It presigns a PUT and uploads a tiny test object directly to your bucket. It uses a dedicated test device id (`OKB-ANDROID-A82F19`) that satisfies the backend's device contract; `--via-backend` registers it first. `✅ R2 upload OK` means the
 credentials, bucket permission and presigner are all correct (you can delete the test object). To test
 the whole server path instead: `node scripts/verify-r2.js --via-backend http://localhost:8080 [--token …]`.
 
