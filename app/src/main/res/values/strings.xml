@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OKB WhatsApp Bridge</string>
+    <string name="listener_service_label">OKB WhatsApp Bridge monitoring</string>
+    <string name="alert_channel_name">Bridge health alerts</string>
+    <string name="alert_channel_description">Warnings when background WhatsApp monitoring may be inactive.</string>
+</resources>
