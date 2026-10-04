@@ -1,0 +1,51 @@
+package com.okb.whatsappbridge.domain.model
+
+/** Snapshot of real Android system state relevant to background reliability. */
+data class SystemStatus(
+    val notificationAccessGranted: Boolean,
+    val listenerConnected: Boolean,
+    val installedWhatsAppPackages: List<String>,
+    val ignoringBatteryOptimizations: Boolean,
+    val backgroundRestricted: Boolean?,
+    val standbyBucket: String?,
+    val powerSaveMode: Boolean,
+    val appNotificationsEnabled: Boolean,
+    val networkAvailable: Boolean,
+    val sdkInt: Int,
+    val manufacturer: String,
+    val model: String,
+) {
+    val whatsAppInstalled: Boolean get() = installedWhatsAppPackages.isNotEmpty()
+}
+
+/** Effective monitoring state, derived from the user setting *and* actual system state. */
+enum class MonitoringState {
+    /** Enabled, Notification Access granted, and the listener is bound by Android. */
+    ACTIVE,
+
+    /** The user paused monitoring. */
+    PAUSED,
+
+    /** Enabled, but Android Notification Access is not granted. */
+    NO_ACCESS,
+
+    /** Enabled and access granted, but Android has not (re)bound the listener in this process. */
+    LISTENER_DISCONNECTED;
+
+    companion object {
+        fun from(enabled: Boolean, accessGranted: Boolean, listenerConnected: Boolean): MonitoringState = when {
+            !enabled -> PAUSED
+            !accessGranted -> NO_ACCESS
+            !listenerConnected -> LISTENER_DISCONNECTED
+            else -> ACTIVE
+        }
+    }
+}
+
+interface SystemStatusProvider {
+    fun snapshot(): SystemStatus
+    fun isNotificationAccessGranted(): Boolean
+    fun isListenerConnected(): Boolean
+    /** Asks Android to rebind the listener (supported API; it does not bypass user consent). */
+    fun requestListenerRebind(): Boolean
+}
