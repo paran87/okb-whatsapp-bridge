@@ -40,6 +40,7 @@ import com.okb.whatsappbridge.ui.components.Formatters
 import com.okb.whatsappbridge.ui.components.KeyValueLine
 import com.okb.whatsappbridge.ui.components.MonitoringToggleCard
 import com.okb.whatsappbridge.ui.components.Panel
+import com.okb.whatsappbridge.ui.components.SectionDivider
 import com.okb.whatsappbridge.ui.components.StatusLevel
 import com.okb.whatsappbridge.ui.components.StatusLine
 import com.okb.whatsappbridge.util.system.SystemSettingsIntents
@@ -55,6 +56,8 @@ fun SettingsScreen(
     onRegisterDevice: () -> Unit,
     onTestBackend: () -> Unit,
     onSetSyncPaused: (Boolean) -> Unit,
+    onSetCaptureMedia: (Boolean) -> Unit,
+    onSetDeleteLocalAfterUpload: (Boolean) -> Unit,
     onOpenDiagnostics: () -> Unit,
     onRefresh: () -> Unit,
 ) {
@@ -240,6 +243,35 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+
+        item {
+            Panel(title = "Media Capture", modifier = narrow) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Capture media attachments", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    Switch(checked = settings.captureMedia, onCheckedChange = onSetCaptureMedia)
+                }
+                Text(
+                    "When on, the bridge records media attachments it detects and acquires the original file only when " +
+                        "Android legitimately provides it on the notification. Text and captions are always captured. " +
+                        "No storage permission is requested: the bridge reads only notification-provided media URIs and " +
+                        "never WhatsApp's private storage.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                SectionDivider()
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Delete local copy after upload", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    Switch(checked = settings.deleteLocalAfterUpload, onCheckedChange = onSetDeleteLocalAfterUpload)
+                }
+                Text(
+                    "A local media file is deleted only after the backend confirms its upload. When off, uploaded media is " +
+                        "kept locally for 30 days.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                KeyValueLine("Local media storage used", Formatters.bytes(state.polled.mediaStorageUsedBytes))
             }
         }
 

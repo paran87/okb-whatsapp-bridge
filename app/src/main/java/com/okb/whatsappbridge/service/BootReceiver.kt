@@ -28,6 +28,9 @@ class BootReceiver : BroadcastReceiver() {
                 if (container.messageRepository.countUploadable(includeFailed = false) > 0) {
                     container.uploadScheduler.requestUpload(SyncTrigger.IMMEDIATE)
                 }
+                if (container.mediaRepository.countUploadable(includeFailed = false) > 0) {
+                    container.uploadScheduler.requestMediaUpload(SyncTrigger.IMMEDIATE)
+                }
                 val access = container.systemStatus.isNotificationAccessGranted()
                 if (access && !container.systemStatus.isListenerConnected()) container.systemStatus.requestListenerRebind()
                 container.logger.info("Boot", "Recovered after $reason; notification access granted=$access")

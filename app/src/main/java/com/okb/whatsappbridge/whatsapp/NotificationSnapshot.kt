@@ -40,4 +40,11 @@ data class SnapshotMessage(
     val timestamp: Long,
     /** `null` means the message was sent by the device owner (MessagingStyle convention). */
     val sender: String?,
+    /**
+     * The ONLY legitimate original-media reference a notification can carry: a content URI set by the
+     * sender app via `MessagingStyle.Message.setData(mimeType, uri)`. Usually absent for WhatsApp group
+     * media. A string here is an opaque `content://`/`file://` URI; reading it may still be denied.
+     */
+    val dataUri: String? = null,
+    val dataMimeType: String? = null,
 )

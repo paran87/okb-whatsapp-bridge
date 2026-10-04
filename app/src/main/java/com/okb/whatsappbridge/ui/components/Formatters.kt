@@ -41,4 +41,15 @@ object Formatters {
     }
 
     fun startOfToday(): Long = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+    /** Human-readable byte size, e.g. "0 B", "4.2 KB", "317 MB", "1.3 GB". */
+    fun bytes(value: Long?): String {
+        val v = value ?: return "—"
+        if (v < 1024) return "$v B"
+        val units = listOf("KB", "MB", "GB", "TB")
+        var size = v.toDouble() / 1024
+        var i = 0
+        while (size >= 1024 && i < units.lastIndex) { size /= 1024; i++ }
+        return (if (size >= 100) "%.0f" else "%.1f").format(size) + " " + units[i]
+    }
 }

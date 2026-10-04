@@ -45,6 +45,11 @@ class RoomSettingsRepository(
 
     override suspend fun recordHealthCheck(at: Long) = put(SettingKeys.LAST_HEALTH_CHECK_AT, at.toString())
     override suspend fun recordBoot(at: Long) = put(SettingKeys.LAST_BOOT_AT, at.toString())
+    override suspend fun setCaptureMedia(enabled: Boolean) = put(SettingKeys.CAPTURE_MEDIA, enabled.toString())
+    override suspend fun setDeleteLocalAfterUpload(enabled: Boolean) = put(SettingKeys.DELETE_LOCAL_AFTER_UPLOAD, enabled.toString())
+    override suspend fun recordMediaCapture(at: Long) = put(SettingKeys.LAST_MEDIA_CAPTURE_AT, at.toString())
+    override suspend fun recordMediaUploadSuccess(at: Long) = put(SettingKeys.LAST_MEDIA_UPLOAD_AT, at.toString())
+    override suspend fun recordMediaFailure(at: Long, error: String) = put(SettingKeys.LAST_MEDIA_ERROR, error.take(300))
 
     private suspend fun put(key: String, value: String?) = dao.put(BridgeSettingsEntity(key, value, clock()))
 
@@ -75,6 +80,11 @@ class RoomSettingsRepository(
             lastBackendCheckMessage = map[SettingKeys.LAST_BACKEND_CHECK_MESSAGE],
             lastHealthCheckAt = long(SettingKeys.LAST_HEALTH_CHECK_AT),
             lastBootAt = long(SettingKeys.LAST_BOOT_AT),
+            captureMedia = bool(SettingKeys.CAPTURE_MEDIA) ?: true,
+            deleteLocalAfterUpload = bool(SettingKeys.DELETE_LOCAL_AFTER_UPLOAD) ?: true,
+            lastMediaCaptureAt = long(SettingKeys.LAST_MEDIA_CAPTURE_AT),
+            lastMediaUploadAt = long(SettingKeys.LAST_MEDIA_UPLOAD_AT),
+            lastMediaError = map[SettingKeys.LAST_MEDIA_ERROR],
         )
     }
 }

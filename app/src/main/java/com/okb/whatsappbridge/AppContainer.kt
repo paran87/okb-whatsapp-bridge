@@ -2,24 +2,31 @@ package com.okb.whatsappbridge
 
 import android.app.Application
 import android.os.Build
+import java.io.File
 import androidx.work.WorkManager
 import com.okb.whatsappbridge.data.local.database.BridgeDatabase
 import com.okb.whatsappbridge.data.remote.api.OkHttpBridgeApi
+import com.okb.whatsappbridge.data.remote.api.OkHttpMediaUploader
 import com.okb.whatsappbridge.data.repository.RoomGroupRepository
 import com.okb.whatsappbridge.data.repository.RoomLogRepository
+import com.okb.whatsappbridge.data.repository.RoomMediaRepository
 import com.okb.whatsappbridge.data.repository.RoomMessageRepository
 import com.okb.whatsappbridge.data.repository.RoomSettingsRepository
 import com.okb.whatsappbridge.data.repository.SecureDeviceIdentityRepository
+import com.okb.whatsappbridge.domain.usecase.AcquireMediaUseCase
 import com.okb.whatsappbridge.domain.usecase.BackendUseCases
 import com.okb.whatsappbridge.domain.usecase.DeviceInfo
 import com.okb.whatsappbridge.domain.usecase.HealthCheckUseCase
 import com.okb.whatsappbridge.domain.usecase.ProcessNotificationUseCase
+import com.okb.whatsappbridge.domain.usecase.SyncMediaUseCase
 import com.okb.whatsappbridge.domain.usecase.SyncMessagesUseCase
 import com.okb.whatsappbridge.service.AndroidHealthAlertNotifier
+import com.okb.whatsappbridge.media.AndroidMediaContentAccess
 import com.okb.whatsappbridge.service.NotificationProcessor
 import com.okb.whatsappbridge.util.logging.BridgeLogger
 import com.okb.whatsappbridge.util.logging.RoomBridgeLogger
 import com.okb.whatsappbridge.util.security.KeystoreSecretStore
+import com.okb.whatsappbridge.util.media.FileSystemMediaFileStore
 import com.okb.whatsappbridge.util.system.AndroidSystemStatusProvider
 import com.okb.whatsappbridge.worker.WorkManagerUploadScheduler
 import kotlinx.coroutines.CoroutineScope
@@ -44,6 +51,12 @@ class AppContainer(private val app: Application) {
     val messageRepository by lazy { RoomMessageRepository(database.messageDao(), database.settingsDao(), identity) }
     val logRepository by lazy { RoomLogRepository(database.eventLogDao()) }
 
+    // Phase 2 (media). Local copies live in the app sandbox (filesDir/media), never WhatsApp storage.
+    val mediaFileStore by lazy { FileSystemMediaFileStore(File(app.filesDir, "media")) }
+    val mediaRepository by lazy { RoomMediaRepository(database.mediaDao(), mediaFileStore) }
+    val mediaContentAccess by lazy { AndroidMediaContentAccess(app) }
+    val mediaUploader by lazy { OkHttpMediaUploader() }
+
     val api by lazy {
         OkHttpBridgeApi(userAgent = "OKB-WhatsApp-Bridge/${BuildConfig.VERSION_NAME} (Android ${Build.VERSION.RELEASE})")
     }
@@ -60,13 +73,23 @@ class AppContainer(private val app: Application) {
         model = Build.MODEL.orEmpty(),
     )
 
+    val acquireMedia by lazy {
+        AcquireMediaUseCase(mediaRepository, settingsRepository, mediaContentAccess, mediaFileStore, uploadScheduler, logger)
+    }
     val processNotification by lazy {
-        ProcessNotificationUseCase(settingsRepository, groupRepository, messageRepository, uploadScheduler)
+        ProcessNotificationUseCase(
+            settingsRepository, groupRepository, messageRepository, uploadScheduler,
+            media = mediaRepository, acquireMedia = acquireMedia, deviceId = { identity.deviceId() },
+        )
     }
     val notificationProcessor by lazy { NotificationProcessor(appScope, processNotification, logger) }
     val syncMessages by lazy { SyncMessagesUseCase(settingsRepository, messageRepository, identity, api, logger) }
+    val syncMedia by lazy { SyncMediaUseCase(settingsRepository, mediaRepository, identity, api, mediaUploader, logger) }
     val backend by lazy { BackendUseCases(settingsRepository, identity, api, deviceInfo, logger) }
     val healthCheck by lazy {
-        HealthCheckUseCase(settingsRepository, messageRepository, systemStatus, uploadScheduler, backend, healthAlerts, logger)
+        HealthCheckUseCase(
+            settingsRepository, messageRepository, systemStatus, uploadScheduler, backend, healthAlerts, logger,
+            media = mediaRepository,
+        )
     }
 }

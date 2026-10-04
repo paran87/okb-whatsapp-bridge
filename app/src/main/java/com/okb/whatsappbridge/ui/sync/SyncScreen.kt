@@ -32,6 +32,8 @@ fun SyncScreen(
     state: StatusUiState,
     onSyncNow: () -> Unit,
     onRetryFailed: () -> Unit,
+    onSyncMediaNow: () -> Unit,
+    onRetryFailedMedia: () -> Unit,
     onSetSyncPaused: (Boolean) -> Unit,
 ) {
     val counts = state.counts
@@ -82,6 +84,28 @@ fun SyncScreen(
                 ButtonRow {
                     OutlinedButton(onClick = onRetryFailed, enabled = counts.failed > 0) { Text("Retry failed") }
                     Button(onClick = onSyncNow, enabled = !settings.syncPaused && settings.backendConfigured) { Text("Sync now") }
+                }
+            }
+        }
+
+        val media = state.mediaCounts
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Panel(title = "Media Synchronization") {
+                val worker = StatusPresentation.syncWorker(state.mediaUploadWorker, settings.syncPaused, media.pendingUploadTotal)
+                StatusLine("Media upload worker", worker.level, worker.label, worker.detail)
+                KeyValueLine("Available (acquired)", media.available.toString())
+                KeyValueLine("Pending media upload", media.pendingUploadTotal.toString())
+                KeyValueLine("Uploaded media", media.uploaded.toString())
+                KeyValueLine("Failed media", media.uploadFailed.toString())
+                KeyValueLine("Unavailable (no file provided)", media.unavailable.toString())
+                KeyValueLine("Local storage used", Formatters.bytes(state.polled.mediaStorageUsedBytes))
+                KeyValueLine("Last media upload", Formatters.time(settings.lastMediaUploadAt))
+                settings.lastMediaError?.let {
+                    Text("Last media error: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+                ButtonRow {
+                    OutlinedButton(onClick = onRetryFailedMedia, enabled = media.uploadFailed > 0) { Text("Retry failed media") }
+                    Button(onClick = onSyncMediaNow, enabled = !settings.syncPaused && settings.backendConfigured) { Text("Sync media now") }
                 }
             }
         }

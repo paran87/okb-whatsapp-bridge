@@ -6,11 +6,14 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.okb.whatsappbridge.data.local.dao.EventLogDao
 import com.okb.whatsappbridge.data.local.dao.GroupDao
+import com.okb.whatsappbridge.data.local.dao.MediaDao
 import com.okb.whatsappbridge.data.local.dao.MessageDao
 import com.okb.whatsappbridge.data.local.dao.SettingsDao
 import com.okb.whatsappbridge.data.local.dao.UploadQueueDao
 import com.okb.whatsappbridge.data.local.entity.BridgeEventLogEntity
 import com.okb.whatsappbridge.data.local.entity.BridgeSettingsEntity
+import com.okb.whatsappbridge.data.local.entity.MediaAttachmentEntity
+import com.okb.whatsappbridge.data.local.entity.MediaUploadQueueEntity
 import com.okb.whatsappbridge.data.local.entity.MonitoredGroupEntity
 import com.okb.whatsappbridge.data.local.entity.UploadQueueEntity
 import com.okb.whatsappbridge.data.local.entity.WhatsAppMessageEntity
@@ -29,8 +32,10 @@ import com.okb.whatsappbridge.data.local.entity.WhatsAppMessageEntity
         MonitoredGroupEntity::class,
         BridgeSettingsEntity::class,
         BridgeEventLogEntity::class,
+        MediaAttachmentEntity::class,
+        MediaUploadQueueEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class BridgeDatabase : RoomDatabase() {
@@ -39,12 +44,15 @@ abstract class BridgeDatabase : RoomDatabase() {
     abstract fun groupDao(): GroupDao
     abstract fun settingsDao(): SettingsDao
     abstract fun eventLogDao(): EventLogDao
+    abstract fun mediaDao(): MediaDao
 
     companion object {
         const val NAME = "okb_bridge.db"
 
         fun create(context: Context): BridgeDatabase =
             Room.databaseBuilder(context.applicationContext, BridgeDatabase::class.java, NAME)
+                .addMigrations(*Migrations.ALL)
+                // Enforce media/message FK cascade so deleting a message removes its media rows.
                 .build()
     }
 }

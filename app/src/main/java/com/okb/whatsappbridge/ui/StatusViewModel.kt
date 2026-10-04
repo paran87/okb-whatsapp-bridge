@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.okb.whatsappbridge.AppContainer
 import com.okb.whatsappbridge.domain.model.BridgeSettings
 import com.okb.whatsappbridge.domain.model.MonitoringState
+import com.okb.whatsappbridge.domain.model.MediaCounts
 import com.okb.whatsappbridge.domain.model.QueueCounts
 import com.okb.whatsappbridge.domain.model.SystemStatus
 import com.okb.whatsappbridge.domain.usecase.SyncTrigger
@@ -36,6 +37,10 @@ data class PolledState(
     val hasToken: Boolean = false,
     val tokenPreview: String = "Not set",
     val dayStart: Long = Formatters.startOfToday(),
+    val mediaStorageUsedBytes: Long = 0,
+    val mediaLargestQueuedBytes: Long = 0,
+    val mediaUsableSpaceBytes: Long? = null,
+    val mediaAcquisitionSupported: Boolean = true,
 )
 
 data class StatusUiState(
@@ -48,6 +53,11 @@ data class StatusUiState(
     val uploadWorker: SyncWorkerState = SyncWorkerState.IDLE,
     val reconciliation: ReconciliationState = ReconciliationState(false, null),
     val authorizedGroups: Int = 0,
+    val mediaCounts: MediaCounts = MediaCounts(),
+    val mediaCapturedToday: Int = 0,
+    val lastMediaCaptureAt: Long? = null,
+    val lastMediaUploadAt: Long? = null,
+    val mediaUploadWorker: SyncWorkerState = SyncWorkerState.IDLE,
     val loaded: Boolean = false,
 ) {
     val system: SystemStatus? get() = polled.system
@@ -59,6 +69,11 @@ data class StatusUiState(
  * Activity-scoped state shared by Dashboard, Sync, Settings and Diagnostics.
  * Every value comes from Room, WorkManager or Android system services – nothing is simulated.
  */
+private data class Derived(val latest: Long?, val worker: SyncWorkerState, val reconcile: ReconciliationState, val groups: Int)
+private data class MediaFlowState(
+    val counts: MediaCounts, val today: Int, val lastCapture: Long?, val lastUpload: Long?, val worker: SyncWorkerState,
+)
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class StatusViewModel(private val container: AppContainer) : ViewModel() {
 
@@ -89,14 +104,36 @@ class StatusViewModel(private val container: AppContainer) : ViewModel() {
         )
     }
 
-    val state: StateFlow<StatusUiState> = combine(
-        base,
+    private val derived = combine(
         container.messageRepository.observeLatestMessageTimestamp(),
         container.uploadScheduler.observeUploadState(),
         container.uploadScheduler.observeReconciliation(),
         container.groupRepository.observeGroups().map { groups -> groups.count { it.authorized } },
-    ) { s, latest, worker, reconcile, groups ->
-        s.copy(latestMessageAt = latest, uploadWorker = worker, reconciliation = reconcile, authorizedGroups = groups)
+    ) { latest, worker, reconcile, groups -> Derived(latest, worker, reconcile, groups) }
+
+    private val mediaToday = polled.map { it.dayStart }
+        .flatMapLatest { container.mediaRepository.observeCapturedSince(it) }
+
+    private val mediaFlow = combine(
+        container.mediaRepository.observeMediaCounts(),
+        mediaToday,
+        container.mediaRepository.observeLastCaptureAt(),
+        container.mediaRepository.observeLastUploadAt(),
+        container.uploadScheduler.observeMediaUploadState(),
+    ) { counts, today, lastCapture, lastUpload, worker -> MediaFlowState(counts, today, lastCapture, lastUpload, worker) }
+
+    val state: StateFlow<StatusUiState> = combine(base, derived, mediaFlow) { s, d, m ->
+        s.copy(
+            latestMessageAt = d.latest,
+            uploadWorker = d.worker,
+            reconciliation = d.reconcile,
+            authorizedGroups = d.groups,
+            mediaCounts = m.counts,
+            mediaCapturedToday = m.today,
+            lastMediaCaptureAt = m.lastCapture,
+            lastMediaUploadAt = m.lastUpload,
+            mediaUploadWorker = m.worker,
+        )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StatusUiState())
 
     init {
@@ -116,6 +153,10 @@ class StatusViewModel(private val container: AppContainer) : ViewModel() {
                     hasToken = !token.isNullOrEmpty(),
                     tokenPreview = Redactor.mask(token),
                     dayStart = Formatters.startOfToday(),
+                    mediaStorageUsedBytes = runCatching { container.mediaRepository.storageUsedBytes() }.getOrDefault(0),
+                    mediaLargestQueuedBytes = runCatching { container.mediaRepository.largestQueuedBytes() }.getOrDefault(0),
+                    mediaUsableSpaceBytes = runCatching { container.mediaRepository.usableSpaceBytes() }.getOrNull(),
+                    mediaAcquisitionSupported = runCatching { container.mediaContentAccess.isMediaAcquisitionSupported() }.getOrDefault(true),
                 )
             }
         }
@@ -136,7 +177,10 @@ class StatusViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             container.settingsRepository.setSyncPaused(paused)
             container.logger.info("Operator", if (paused) "Synchronization paused" else "Synchronization resumed")
-            if (!paused) container.uploadScheduler.requestUpload(SyncTrigger.MANUAL)
+            if (!paused) {
+                container.uploadScheduler.requestUpload(SyncTrigger.MANUAL)
+                container.uploadScheduler.requestMediaUpload(SyncTrigger.MANUAL)
+            }
         }
     }
 
@@ -151,6 +195,30 @@ class StatusViewModel(private val container: AppContainer) : ViewModel() {
             container.uploadScheduler.requestUpload(SyncTrigger.MANUAL)
             _events.emit(if (count == 0) "No failed messages to retry" else "$count failed message(s) queued for retry")
         }
+    }
+
+    fun syncMediaNow() {
+        container.uploadScheduler.requestMediaUpload(SyncTrigger.MANUAL)
+        _events.tryEmit("Media sync requested – it runs as soon as a network connection is available")
+    }
+
+    fun retryFailedMedia() {
+        viewModelScope.launch {
+            val count = container.mediaRepository.resetFailedToPending(System.currentTimeMillis())
+            container.uploadScheduler.requestMediaUpload(SyncTrigger.MANUAL)
+            _events.emit(if (count == 0) "No failed media to retry" else "$count failed media file(s) queued for retry")
+        }
+    }
+
+    fun setCaptureMedia(enabled: Boolean) {
+        viewModelScope.launch {
+            container.settingsRepository.setCaptureMedia(enabled)
+            container.logger.info("Operator", if (enabled) "Media capture enabled" else "Media capture disabled")
+        }
+    }
+
+    fun setDeleteLocalAfterUpload(enabled: Boolean) {
+        viewModelScope.launch { container.settingsRepository.setDeleteLocalAfterUpload(enabled) }
     }
 
     fun testBackend() = runBusy {
@@ -192,6 +260,7 @@ class StatusViewModel(private val container: AppContainer) : ViewModel() {
             return@runBusy
         }
         container.uploadScheduler.requestUpload(SyncTrigger.MANUAL)
+        container.uploadScheduler.requestMediaUpload(SyncTrigger.MANUAL)
         val health = container.backend.checkHealth()
         _events.emit(if (health.ok) "Saved. Backend ${health.message}" else "Saved, but backend check failed: ${health.message}")
     }

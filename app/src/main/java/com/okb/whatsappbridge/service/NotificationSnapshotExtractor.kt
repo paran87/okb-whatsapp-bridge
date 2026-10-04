@@ -26,6 +26,8 @@ object NotificationSnapshotExtractor {
                 text = m.text?.toString(),
                 timestamp = m.timestamp,
                 sender = m.person?.name?.toString(),
+                dataUri = m.dataUri?.toString(),
+                dataMimeType = m.dataMimeType,
             )
         } ?: rawMessages(extras)
 
@@ -77,10 +79,14 @@ object NotificationSnapshotExtractor {
                         null
                     }
                 }.getOrNull()
+            @Suppress("DEPRECATION")
+            val dataUri = runCatching { bundle.getParcelable<android.net.Uri>("uri") }.getOrNull()
             SnapshotMessage(
                 text = bundle.getCharSequence("text")?.toString(),
                 timestamp = bundle.getLong("time", 0L),
                 sender = sender,
+                dataUri = dataUri?.toString(),
+                dataMimeType = bundle.getCharSequence("type")?.toString(),
             )
         }
     }

@@ -14,6 +14,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.okb.whatsappbridge.domain.model.BridgeSettings
+import com.okb.whatsappbridge.domain.model.MediaCounts
 import com.okb.whatsappbridge.domain.model.QueueCounts
 import com.okb.whatsappbridge.domain.model.SystemStatus
 import com.okb.whatsappbridge.ui.dashboard.DashboardScreen
@@ -67,8 +68,13 @@ class ScreenRenderTest {
             lastBackendCheckAt = now - 300_000,
             lastBackendCheckOk = true,
             lastBackendCheckMessage = "Connected (v1.0.0)",
+            lastMediaCaptureAt = now - 118_000,
+            lastMediaUploadAt = now - 116_000,
         ),
-        polled = PolledState(system = system(access, connected), databaseHealthy = true, deviceId = "OKB-ANDROID-A82F19"),
+        polled = PolledState(
+            system = system(access, connected), databaseHealthy = true, deviceId = "OKB-ANDROID-A82F19",
+            mediaStorageUsedBytes = 48_234_496, mediaLargestQueuedBytes = 27_000_000, mediaUsableSpaceBytes = 6_000_000_000,
+        ),
         listenerConnected = connected,
         counts = QueueCounts(pending = 2, retrying = 1, uploaded = 244),
         capturedToday = 247,
@@ -76,6 +82,10 @@ class ScreenRenderTest {
         uploadWorker = SyncWorkerState.IDLE,
         reconciliation = ReconciliationState(true, now + 600_000),
         authorizedGroups = 2,
+        mediaCounts = MediaCounts(available = 18, unavailable = 42, pendingUpload = 2, uploaded = 15, uploadFailed = 1),
+        mediaCapturedToday = 60,
+        lastMediaCaptureAt = now - 118_000,
+        lastMediaUploadAt = now - 116_000,
         loaded = true,
     )
 

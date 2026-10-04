@@ -46,7 +46,7 @@ class MessageUploadWorkerTest {
     private fun worker(trigger: SyncTrigger = SyncTrigger.IMMEDIATE): MessageUploadWorker =
         TestListenableWorkerBuilder<MessageUploadWorker>(context)
             .setInputData(workDataOf(MessageUploadWorker.KEY_TRIGGER to trigger.name))
-            .setWorkerFactory(BridgeWorkerFactory({ bridge.sync }, { error("unused") }, { bridge.logger }))
+            .setWorkerFactory(BridgeWorkerFactory({ bridge.sync }, { error("unused media") }, { error("unused") }, { bridge.logger }))
             .build()
 
     @Test

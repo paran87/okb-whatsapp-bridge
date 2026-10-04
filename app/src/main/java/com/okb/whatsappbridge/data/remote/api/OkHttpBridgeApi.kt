@@ -5,6 +5,10 @@ import com.okb.whatsappbridge.data.remote.dto.DeviceRegistrationResponse
 import com.okb.whatsappbridge.data.remote.dto.HealthResponse
 import com.okb.whatsappbridge.data.remote.dto.MessageUploadRequest
 import com.okb.whatsappbridge.data.remote.dto.MessageUploadResponse
+import com.okb.whatsappbridge.data.remote.dto.MediaIntentRequest
+import com.okb.whatsappbridge.data.remote.dto.MediaIntentResponse
+import com.okb.whatsappbridge.data.remote.dto.MediaCompleteRequest
+import com.okb.whatsappbridge.data.remote.dto.MediaCompleteResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
@@ -47,6 +51,30 @@ class OkHttpBridgeApi(
         MessageUploadResponse.serializer(),
         MessageUploadResponse(),
         idempotencyKey = request.fingerprint,
+    )
+
+    override suspend fun mediaIntent(
+        config: BackendConfig,
+        request: MediaIntentRequest,
+    ): ApiResult<MediaIntentResponse> = execute(
+        config,
+        "api/v1/media/intent",
+        body = json.encodeToString(MediaIntentRequest.serializer(), request),
+        MediaIntentResponse.serializer(),
+        MediaIntentResponse(),
+        idempotencyKey = request.sha256,
+    )
+
+    override suspend fun mediaComplete(
+        config: BackendConfig,
+        request: MediaCompleteRequest,
+    ): ApiResult<MediaCompleteResponse> = execute(
+        config,
+        "api/v1/media/complete",
+        body = json.encodeToString(MediaCompleteRequest.serializer(), request),
+        MediaCompleteResponse.serializer(),
+        MediaCompleteResponse(),
+        idempotencyKey = request.sha256,
     )
 
     private suspend fun <T> execute(

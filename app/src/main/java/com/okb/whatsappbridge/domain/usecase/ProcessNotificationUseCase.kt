@@ -1,8 +1,11 @@
 package com.okb.whatsappbridge.domain.usecase
 
+import com.okb.whatsappbridge.domain.model.MediaType
 import com.okb.whatsappbridge.domain.repository.GroupRepository
+import com.okb.whatsappbridge.domain.repository.MediaRepository
 import com.okb.whatsappbridge.domain.repository.MessageRepository
 import com.okb.whatsappbridge.domain.repository.NewCapturedMessage
+import com.okb.whatsappbridge.domain.repository.NewMediaAttachment
 import com.okb.whatsappbridge.domain.repository.SaveResult
 import com.okb.whatsappbridge.domain.repository.SettingsRepository
 import com.okb.whatsappbridge.domain.repository.UploadScheduler
@@ -12,28 +15,38 @@ import com.okb.whatsappbridge.whatsapp.FilterDecision
 import com.okb.whatsappbridge.whatsapp.GroupAllowlist
 import com.okb.whatsappbridge.whatsapp.IgnoreReason
 import com.okb.whatsappbridge.whatsapp.NotificationSnapshot
+import com.okb.whatsappbridge.whatsapp.ParsedMessage
 import com.okb.whatsappbridge.whatsapp.WhatsAppNotificationFilter
 import com.okb.whatsappbridge.whatsapp.WhatsAppNotificationParser
 
 sealed interface ProcessingOutcome {
     data class Ignored(val reason: IgnoreReason) : ProcessingOutcome
-    data class Captured(val groupName: String, val inserted: Int, val duplicates: Int) : ProcessingOutcome
+    data class Captured(
+        val groupName: String,
+        val inserted: Int,
+        val duplicates: Int,
+        val mediaDetected: Int = 0,
+    ) : ProcessingOutcome
 }
 
 /**
  * The capture pipeline executed for every posted notification, entirely in the background:
  *
  * monitoring enabled? → WhatsApp package? → system notification? → parse → authorized group?
- * → fingerprint → save to Room (with queue entry) → schedule WorkManager upload.
+ * → fingerprint → save message to Room → (Phase 2) create+acquire linked media → schedule uploads.
  *
- * The network is never touched here: messages are persisted first so nothing is lost if the
- * backend or connectivity is unavailable.
+ * The network is never touched here: messages (and any acquired media) are persisted first so nothing
+ * is lost if the backend or connectivity is unavailable. Media acquisition never blocks or fails text
+ * capture; when no legitimate media file is available the media row rests at UNAVAILABLE.
  */
 class ProcessNotificationUseCase(
     private val settings: SettingsRepository,
     private val groups: GroupRepository,
     private val messages: MessageRepository,
     private val scheduler: UploadScheduler,
+    private val media: MediaRepository? = null,
+    private val acquireMedia: AcquireMediaUseCase? = null,
+    private val deviceId: () -> String = { "" },
     private val filter: WhatsAppNotificationFilter = WhatsAppNotificationFilter(),
     private val parser: WhatsAppNotificationParser = WhatsAppNotificationParser(),
     private val clock: () -> Long = System::currentTimeMillis,
@@ -44,7 +57,8 @@ class ProcessNotificationUseCase(
 
         val now = clock()
         settings.recordNotificationReceived(now)
-        if (!settings.current().monitoringEnabled) return ProcessingOutcome.Ignored(IgnoreReason.MONITORING_PAUSED)
+        val current = settings.current()
+        if (!current.monitoringEnabled) return ProcessingOutcome.Ignored(IgnoreReason.MONITORING_PAUSED)
 
         val decision = filter.evaluate(snapshot)
         if (decision is FilterDecision.Ignore) return ProcessingOutcome.Ignored(decision.reason)
@@ -54,13 +68,13 @@ class ProcessNotificationUseCase(
 
         val authorizedGroup = GroupAllowlist.match(parsed.groupNameCandidates, groups.authorizedGroupNames())
         if (authorizedGroup == null) {
-            // Remember the group name (only the name) so the operator can authorize it in Groups.
             if (parsed.conversationType == ConversationType.GROUP) parsed.groupName?.let { groups.recordSeen(it, now) }
             return ProcessingOutcome.Ignored(IgnoreReason.GROUP_NOT_AUTHORIZED)
         }
 
         var inserted = 0
         var duplicates = 0
+        var mediaDetected = 0
         for (message in parsed.messages) {
             if (filter.isIgnoredMessageText(message.text)) continue
             val fingerprint = MessageFingerprint.compute(
@@ -69,7 +83,7 @@ class ProcessNotificationUseCase(
                 messageText = message.text,
                 timestamp = message.timestamp,
             )
-            val result = messages.saveCaptured(
+            val outcome = messages.saveCaptured(
                 NewCapturedMessage(
                     groupName = authorizedGroup,
                     senderName = message.senderName,
@@ -83,7 +97,14 @@ class ProcessNotificationUseCase(
                     capturedAt = now,
                 ),
             )
-            if (result == SaveResult.INSERTED) inserted++ else duplicates++
+            if (outcome.result == SaveResult.INSERTED) {
+                inserted++
+                if (outcome.messageId != null && isMediaMessage(message) && current.captureMedia) {
+                    if (handleMedia(outcome.messageId, authorizedGroup, message, now)) mediaDetected++
+                }
+            } else {
+                duplicates++
+            }
         }
 
         groups.recordSeen(authorizedGroup, now)
@@ -91,6 +112,35 @@ class ProcessNotificationUseCase(
             settings.recordProcessed(now)
             scheduler.requestUpload()
         }
-        return ProcessingOutcome.Captured(authorizedGroup, inserted, duplicates)
+        return ProcessingOutcome.Captured(authorizedGroup, inserted, duplicates, mediaDetected)
+    }
+
+    private fun isMediaMessage(message: ParsedMessage): Boolean =
+        message.mediaType != MediaType.TEXT && message.mediaType != MediaType.LOCATION
+
+    /** Creates the media row and attempts acquisition. Returns true if a media row was created. */
+    private suspend fun handleMedia(messageId: String, group: String, message: ParsedMessage, now: Long): Boolean {
+        val mediaRepo = media ?: return false
+        val mediaId = mediaRepo.createDetected(
+            NewMediaAttachment(
+                messageId = messageId,
+                deviceId = deviceId(),
+                groupName = group,
+                senderName = message.senderName,
+                mediaType = message.mediaType,
+                mimeType = message.dataMimeType,
+                originalFileName = null,
+                createdAt = now,
+            ),
+        ) ?: return false
+        acquireMedia?.invoke(
+            MediaAcquisitionRequest(
+                mediaId = mediaId,
+                mediaType = message.mediaType,
+                dataUri = message.dataUri,
+                dataMimeType = message.dataMimeType,
+            ),
+        )
+        return true
     }
 }

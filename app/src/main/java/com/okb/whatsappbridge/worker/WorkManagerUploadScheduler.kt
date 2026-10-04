@@ -42,20 +42,27 @@ class WorkManagerUploadScheduler(
 
     private val mutex = Mutex()
 
-    override fun requestUpload(trigger: SyncTrigger) {
+    override fun requestUpload(trigger: SyncTrigger) = schedule(Kind.MESSAGE, trigger)
+
+    override fun requestMediaUpload(trigger: SyncTrigger) = schedule(Kind.MEDIA, trigger)
+
+    private enum class Kind { MESSAGE, MEDIA }
+
+    private fun schedule(kind: Kind, trigger: SyncTrigger) {
         scope.launch(Dispatchers.IO) {
             mutex.withLock {
                 try {
-                    enqueue(trigger)
+                    enqueue(kind, trigger)
                 } catch (e: Exception) {
-                    logger.error(TAG, "Could not schedule upload work", e)
+                    logger.error(TAG, "Could not schedule ${kind.name.lowercase()} upload work", e)
                 }
             }
         }
     }
 
-    private fun enqueue(trigger: SyncTrigger) {
-        val infos = workManager.getWorkInfosForUniqueWork(UPLOAD_WORK_NAME).get().orEmpty()
+    private fun enqueue(kind: Kind, trigger: SyncTrigger) {
+        val workName = if (kind == Kind.MESSAGE) UPLOAD_WORK_NAME else MEDIA_UPLOAD_WORK_NAME
+        val infos = workManager.getWorkInfosForUniqueWork(workName).get().orEmpty()
         val running = infos.any { it.state == WorkInfo.State.RUNNING }
         val waiting = infos.any { it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.BLOCKED }
         val policy = when {
@@ -64,13 +71,18 @@ class WorkManagerUploadScheduler(
             waiting && trigger == SyncTrigger.IMMEDIATE -> return
             else -> ExistingWorkPolicy.REPLACE
         }
-        val request = OneTimeWorkRequestBuilder<MessageUploadWorker>()
+        val builder = if (kind == Kind.MESSAGE) {
+            OneTimeWorkRequestBuilder<MessageUploadWorker>()
+        } else {
+            OneTimeWorkRequestBuilder<MediaUploadWorker>()
+        }
+        val request = builder
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_SECONDS, TimeUnit.SECONDS)
             .setInputData(workDataOf(MessageUploadWorker.KEY_TRIGGER to trigger.name))
-            .addTag(UPLOAD_TAG)
+            .addTag(if (kind == Kind.MESSAGE) UPLOAD_TAG else MEDIA_UPLOAD_TAG)
             .build()
-        workManager.enqueueUniqueWork(UPLOAD_WORK_NAME, policy, request)
+        workManager.enqueueUniqueWork(workName, policy, request)
     }
 
     override fun ensurePeriodicReconciliation() {
@@ -82,6 +94,16 @@ class WorkManagerUploadScheduler(
 
     fun observeUploadState(): Flow<SyncWorkerState> =
         workManager.getWorkInfosForUniqueWorkFlow(UPLOAD_WORK_NAME).map { infos ->
+            when {
+                infos.any { it.state == WorkInfo.State.RUNNING } -> SyncWorkerState.RUNNING
+                infos.any { it.state == WorkInfo.State.ENQUEUED && it.runAttemptCount > 0 } -> SyncWorkerState.BACKING_OFF
+                infos.any { it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.BLOCKED } -> SyncWorkerState.WAITING
+                else -> SyncWorkerState.IDLE
+            }
+        }
+
+    fun observeMediaUploadState(): Flow<SyncWorkerState> =
+        workManager.getWorkInfosForUniqueWorkFlow(MEDIA_UPLOAD_WORK_NAME).map { infos ->
             when {
                 infos.any { it.state == WorkInfo.State.RUNNING } -> SyncWorkerState.RUNNING
                 infos.any { it.state == WorkInfo.State.ENQUEUED && it.runAttemptCount > 0 } -> SyncWorkerState.BACKING_OFF
@@ -102,8 +124,10 @@ class WorkManagerUploadScheduler(
     companion object {
         private const val TAG = "Scheduler"
         const val UPLOAD_WORK_NAME = "okb-message-upload"
+        const val MEDIA_UPLOAD_WORK_NAME = "okb-media-upload"
         const val RECONCILE_WORK_NAME = "okb-reconciliation"
         const val UPLOAD_TAG = "okb-upload"
+        const val MEDIA_UPLOAD_TAG = "okb-media-upload"
         const val RECONCILE_TAG = "okb-reconcile"
         const val BACKOFF_SECONDS = 30L
         const val RECONCILE_INTERVAL_MINUTES = 15L

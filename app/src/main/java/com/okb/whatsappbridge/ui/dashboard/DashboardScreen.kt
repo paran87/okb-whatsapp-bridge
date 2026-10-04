@@ -88,6 +88,8 @@ fun DashboardScreen(
                 StatusLine("Backend", backend.level, backend.label)
                 val worker = StatusPresentation.syncWorker(state.uploadWorker, settings.syncPaused, counts.notUploaded)
                 StatusLine("Sync Worker", worker.level, worker.label)
+                val mediaWorker = StatusPresentation.syncWorker(state.mediaUploadWorker, settings.syncPaused, state.mediaCounts.pendingUploadTotal)
+                StatusLine("Media Worker", mediaWorker.level, mediaWorker.label)
                 val db = StatusPresentation.database(state.polled.databaseHealthy)
                 StatusLine("Database", db.level, db.label)
                 ButtonRow {
@@ -123,6 +125,22 @@ fun DashboardScreen(
                 caption = "Last event ${Formatters.relative(settings.lastNotificationAt, now)}",
             )
         }
+
+        val media = state.mediaCounts
+        item { MetricTile(label = "Media Today", value = state.mediaCapturedToday.toString(), caption = "${media.available} with a file · ${media.unavailable} unavailable") }
+        item {
+            MetricTile(
+                label = "Pending Media Uploads",
+                value = media.pendingUploadTotal.toString(),
+                level = when { media.uploadFailed > 0 -> StatusLevel.ERROR; media.pendingUploadTotal > 0 -> StatusLevel.WARNING; else -> StatusLevel.OK },
+                caption = "${media.retrying} retrying · ${media.uploadFailed} failed",
+            )
+        }
+        item { MetricTile(label = "Uploaded Media", value = media.uploaded.toString(), level = StatusLevel.OK) }
+        item { MetricTile(label = "Failed Media", value = media.uploadFailed.toString(), level = if (media.uploadFailed > 0) StatusLevel.ERROR else null) }
+        item { MetricTile(label = "Storage Used", value = Formatters.bytes(state.polled.mediaStorageUsedBytes), caption = "Local media awaiting or kept after upload") }
+        item { MetricTile(label = "Last Media Capture", value = Formatters.shortTime(state.lastMediaCaptureAt)) }
+        item { MetricTile(label = "Last Media Upload", value = Formatters.shortTime(state.lastMediaUploadAt)) }
     }
 }
 

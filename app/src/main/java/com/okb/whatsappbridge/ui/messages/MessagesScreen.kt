@@ -1,5 +1,8 @@
 package com.okb.whatsappbridge.ui.messages
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -33,11 +37,15 @@ import com.okb.whatsappbridge.ui.components.Formatters
 import com.okb.whatsappbridge.ui.components.Panel
 import com.okb.whatsappbridge.ui.components.StatusIndicator
 import com.okb.whatsappbridge.ui.components.StatusLevel
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.sp
+import com.okb.whatsappbridge.ui.components.color
 import com.okb.whatsappbridge.ui.theme.MonoValue
 import com.okb.whatsappbridge.whatsapp.WhatsAppPackages
 
 @Composable
-fun MessagesScreen(viewModel: MessagesViewModel) {
+fun MessagesScreen(viewModel: MessagesViewModel, onOpenDetail: (String) -> Unit) {
     val filter by viewModel.filter.collectAsStateWithLifecycle()
     val messages by viewModel.messages.collectAsStateWithLifecycle()
 
@@ -82,17 +90,17 @@ fun MessagesScreen(viewModel: MessagesViewModel) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                items(list, key = { it.id }) { MessageCard(it) }
+                items(list, key = { it.id }) { MessageCard(it, onOpenDetail) }
             }
         }
     }
 }
 
 @Composable
-private fun MessageCard(message: BridgeMessage) {
+private fun MessageCard(message: BridgeMessage, onOpenDetail: (String) -> Unit) {
     Panel(
         title = message.groupName ?: "Unknown group",
-        modifier = Modifier.widthIn(max = 900.dp),
+        modifier = Modifier.widthIn(max = 900.dp).clickable { onOpenDetail(message.id) },
         trailing = { StatusIndicator(message.uploadStatus.level(), message.uploadStatus.label()) },
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -106,11 +114,16 @@ private fun MessageCard(message: BridgeMessage) {
             Text(Formatters.time(message.timestamp), style = MonoValue, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.height(4.dp))
-        Text(message.messageText ?: "", style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.height(6.dp))
+        if (!message.messageText.isNullOrBlank()) {
+            Text(message.messageText!!, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.height(6.dp))
+        }
+        message.media?.let { m ->
+            MediaChip(com.okb.whatsappbridge.ui.MediaPresentation.chipLabel(m), com.okb.whatsappbridge.ui.MediaPresentation.chipLevel(m), m.fileSizeBytes)
+            Spacer(Modifier.height(6.dp))
+        }
         val meta = buildList {
-            add(message.mediaType.name)
-            if (message.mediaType != MediaType.TEXT) add("media ${message.mediaStatus.name.lowercase()}")
+            if (message.media == null) add(message.mediaType.name)
             add(WhatsAppPackages.displayName(message.packageName))
             if (message.attemptCount > 0) add("${message.attemptCount} attempt(s)")
             message.serverId?.let { add("server id $it") }
@@ -118,6 +131,26 @@ private fun MessageCard(message: BridgeMessage) {
         Text(meta.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         message.lastError?.let {
             Text("Last error: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
+    }
+}
+
+@Composable
+private fun MediaChip(label: String, level: StatusLevel, sizeBytes: Long?) {
+    val color = level.color()
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(color.copy(alpha = 0.14f))
+                .border(1.dp, color.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                .padding(horizontal = 8.dp, vertical = 3.dp),
+        ) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = color, fontSize = 11.sp)
+        }
+        if (sizeBytes != null) {
+            Spacer(Modifier.width(8.dp))
+            Text(Formatters.bytes(sizeBytes), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
