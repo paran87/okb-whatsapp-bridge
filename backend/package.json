@@ -6,7 +6,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "verify:r2": "node scripts/verify-r2.js"
   },
   "engines": {
     "node": ">=18"

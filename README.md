@@ -545,6 +545,19 @@ content → same key → same object).
    the vars instead). `GET /api/v1/health` reports `"media":"r2"` when R2 is active, or
    `"media":"local-sink"` in development.
 
+**Verify R2 actually works** (recommended before relying on it — this exercises the SigV4 presigner
+and your real credentials):
+
+```bash
+cd backend
+# with the R2_* vars set in this shell, or: node --env-file=.env scripts/verify-r2.js
+npm run verify:r2
+```
+
+It presigns a PUT and uploads a tiny test object directly to your bucket. It uses a dedicated test device id (`OKB-ANDROID-A82F19`) that satisfies the backend's device contract; `--via-backend` registers it first. `✅ R2 upload OK` means the
+credentials, bucket permission and presigner are all correct (you can delete the test object). To test
+the whole server path instead: `node scripts/verify-r2.js --via-backend http://localhost:8080 [--token …]`.
+
 With R2 unset, the backend runs the **DEV local-sink** (stores media under `DATA_DIR/media`) so you
 can test end-to-end before configuring R2. `OKB_ALLOW_NO_AUTH=1` remains **DEVELOPMENT ONLY**.
 
