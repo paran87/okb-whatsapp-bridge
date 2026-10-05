@@ -6,10 +6,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { createServer } = require('../server');
+const { offlineAi } = require('./helpers/flood-fixtures');
 
 async function start(opts = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'okb-media-'));
-  const server = createServer({ dataDir, tokens: ['secret-token'], log: () => {}, ...opts });
+  const server = createServer({ dataDir, tokens: ['secret-token'], log: () => {}, ai: offlineAi(), ...opts });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   return { server, base: `http://127.0.0.1:${server.address().port}`, dataDir };
 }

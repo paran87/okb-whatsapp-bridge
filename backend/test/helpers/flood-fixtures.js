@@ -8,7 +8,13 @@
  * fails loudly instead of slipping through.
  */
 const { REPORT_FIELDS, REPORT_GROUPS, LOCATION_FIELDS, LOCATION_GROUPS } = require('../../lib/flood/schema');
-const { AiError } = require('../../lib/ai');
+const { AiError, createAiClient } = require('../../lib/ai');
+
+/**
+ * An AI client with no key: tests that do not exercise AI get it by default, so `npm test` can never
+ * reach a real provider even if AI_API_KEY happens to be exported in the shell.
+ */
+const offlineAi = () => createAiClient({ provider: 'openai', apiKey: null, baseUrl: 'https://api.openai.com', model: 'offline', timeoutMs: 1, maxRetries: 0 });
 
 const M = () => ({ raw: null, status: 'missing' });
 const P = (raw) => ({ raw, status: 'provided' });
@@ -181,7 +187,7 @@ Remarks: No flooding observed`;
 const OTHER_FLOOD_REPORT = 'Update po: may baha na sa may tulay sa Molino, mga hanggang tuhod. Ingat po sa mga dadaan.';
 
 module.exports = {
-  M, P, NA, AMB, location, aiOutput, fakeAi, aiByText,
+  offlineAi, M, P, NA, AMB, location, aiOutput, fakeAi, aiByText,
   MONITORING_REPORT, monitoringAnswer, MULTI_LOCATION_REPORT, multiLocationAnswer,
   PARTIAL_REPORT, partialAnswer, FLOOD_PRONE_REPORT, NON_FLOOD_PRONE_REPORT, OTHER_FLOOD_REPORT,
 };

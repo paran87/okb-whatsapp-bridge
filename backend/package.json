@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
-    "verify:r2": "node scripts/verify-r2.js"
+    "verify:r2": "node scripts/verify-r2.js",
+    "smoke:ai": "node scripts/smoke-ai.js"
   },
   "engines": {
     "node": ">=18"

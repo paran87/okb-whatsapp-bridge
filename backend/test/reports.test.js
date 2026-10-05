@@ -8,13 +8,14 @@ const path = require('node:path');
 const { createServer } = require('../server');
 const { createAiClient, AiError } = require('../lib/ai');
 const F = require('./helpers/flood-fixtures');
+const { offlineAi } = F;
 
 const DEVICE = 'OKB-ANDROID-A82F19';
 const auth = { Authorization: 'Bearer secret-token', 'Content-Type': 'application/json' };
 
 async function start(opts = {}) {
   const dataDir = opts.dataDir || fs.mkdtempSync(path.join(os.tmpdir(), 'okb-reports-'));
-  const server = createServer({ dataDir, tokens: ['secret-token'], log: () => {}, ...opts });
+  const server = createServer({ dataDir, tokens: ['secret-token'], log: () => {}, ai: offlineAi(), ...opts });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
   const api = async (method, p, body, headers = auth) => {
@@ -401,7 +402,7 @@ test('review: approve, reject, reopen; reviewed reports are only re-extracted wi
 });
 
 test('without AI configured, messages are stored, deterministic cases resolve, AI cases wait in "received"', async () => {
-  const t = await start({ ai: createAiClient({ apiKey: null, baseUrl: 'https://api.anthropic.com', model: 'm', timeoutMs: 1, maxRetries: 0 }) });
+  const t = await start({ ai: createAiClient({ provider: 'openai', apiKey: null, baseUrl: 'https://api.openai.com', model: 'gpt-5.6-luna', timeoutMs: 1, maxRetries: 0 }) });
   assert.strictEqual((await t.api('GET', '/api/v1/health')).body.reports.ai, 'not_configured');
   const report = await reportFor(t, (await post(t, msg())).body.id);
   assert.strictEqual(report.status, 'received');

@@ -1,39 +1,47 @@
 'use strict';
 /**
- * Server-side AI client (Claude Messages API over HTTPS, structured JSON output). Dependency-free,
- * like the rest of the backend. The API key never leaves the backend and is never logged.
+ * Server-side AI client: OpenAI Responses API with Structured Outputs. Dependency-free (raw HTTPS via
+ * fetch), like the rest of the backend. The API key never leaves the backend and is never logged.
  *
  * Configuration (environment):
+ *   AI_PROVIDER      "openai" (the only supported provider; default)
  *   AI_API_KEY       required to enable AI extraction
- *   AI_BASE_URL      default https://api.anthropic.com
- *   AI_MODEL         default claude-opus-5-5
+ *   AI_BASE_URL      default https://api.openai.com
+ *   AI_MODEL         default gpt-5.6-luna
  *   AI_TIMEOUT_MS    per-attempt timeout, default 120000
  *   AI_MAX_RETRIES   retries after the first attempt, default 2 (so at most 3 attempts)
  *
- * The response is never trusted: it must parse as JSON and pass the caller's validator, otherwise the
- * attempt counts as failed (and is retried within AI_MAX_RETRIES). Retries are bounded; there is no
- * retry loop beyond that.
+ * The response is never trusted: even with a strict json_schema format it must parse as JSON and pass
+ * the caller's own validator, otherwise the attempt counts as failed (and is retried within
+ * AI_MAX_RETRIES). Retries are bounded and only for transient failures; authentication, permission,
+ * model-not-found, bad-request and quota/billing errors fail immediately.
  */
 
-const ANTHROPIC_VERSION = '2023-06-01';
-const DEFAULT_BASE_URL = 'https://api.anthropic.com';
-const DEFAULT_MODEL = 'claude-opus-5-5';
-const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
-/** Models that accept server-side refusal fallbacks in "default" mode on the first-party API. */
-const FALLBACK_MODELS = new Set(['claude-fable-5-1', 'claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5-5']);
+const DEFAULT_PROVIDER = 'openai';
+const DEFAULT_BASE_URL = 'https://api.openai.com';
+const DEFAULT_MODEL = 'gpt-5.6-luna';
+const SUPPORTED_PROVIDERS = new Set(['openai']);
+
+/** 429 codes that mean "out of money/quota", not "slow down": retrying cannot help. */
+const QUOTA_CODES = new Set([
+  'insufficient_quota', 'credit_balance_exhausted', 'organization_spend_limit_exceeded',
+  'project_spend_limit_exceeded', 'organization_usage_limit_exceeded', 'billing_hard_limit_reached',
+]);
 
 class AiError extends Error {
   /**
    * @param {string} code timeout | rate_limited | unavailable | malformed_output | invalid_schema |
-   *                      refusal | auth | bad_request | not_configured
+   *                      refusal | auth | permission | not_found | bad_request | quota_exceeded |
+   *                      not_configured
    */
-  constructor(code, message, { retryable = false, status = null, attempts = 0 } = {}) {
+  constructor(code, message, { retryable = false, status = null, attempts = 0, requestId = null } = {}) {
     super(message);
     this.name = 'AiError';
     this.code = code;
     this.retryable = retryable;
     this.status = status;
     this.attempts = attempts;
+    this.requestId = requestId;
   }
 }
 
@@ -44,6 +52,7 @@ function intFromEnv(value, fallback) {
 
 function configFromEnv(env = process.env) {
   return {
+    provider: (env.AI_PROVIDER || DEFAULT_PROVIDER).trim().toLowerCase(),
     apiKey: env.AI_API_KEY || null,
     baseUrl: env.AI_BASE_URL || DEFAULT_BASE_URL,
     model: env.AI_MODEL || DEFAULT_MODEL,
@@ -52,18 +61,16 @@ function configFromEnv(env = process.env) {
   };
 }
 
-function messagesEndpoint(baseUrl) {
+function responsesEndpoint(baseUrl) {
   const base = baseUrl.replace(/\/+$/, '');
-  return /\/v1$/.test(base) ? `${base}/messages` : `${base}/v1/messages`;
+  return /\/v1$/.test(base) ? `${base}/responses` : `${base}/v1/responses`;
 }
 
-function isFirstPartyApi(baseUrl) {
-  try { return new URL(baseUrl).hostname === 'api.anthropic.com'; } catch { return false; }
-}
-
-/** Effort is set explicitly only on model families known to accept it; others use their default. */
-function supportsEffort(model) {
-  return /^claude-(opus|sonnet|fable|mythos)-5/.test(model);
+/** Removes anything key-like from text that may end up in logs (OpenAI echoes masked keys on 401). */
+function redact(text, apiKey) {
+  let out = String(text);
+  if (apiKey) out = out.split(apiKey).join('[redacted]');
+  return out.replace(/\b(sk|rk)-[A-Za-z0-9_*.-]{4,}/g, '[redacted]');
 }
 
 const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -77,34 +84,79 @@ function createAiClient(config = configFromEnv(), deps = {}) {
   const sleep = deps.sleep || defaultSleep;
   const log = deps.log || (() => {});
   const random = deps.random || Math.random;
-  const endpoint = messagesEndpoint(config.baseUrl);
-  const firstParty = isFirstPartyApi(config.baseUrl);
+  const provider = config.provider || DEFAULT_PROVIDER;
+  const supported = SUPPORTED_PROVIDERS.has(provider);
+  const endpoint = responsesEndpoint(config.baseUrl || DEFAULT_BASE_URL);
 
-  function backoffMs(attempt, retryAfterHeader) {
-    const retryAfter = parseFloat(retryAfterHeader || '');
-    if (Number.isFinite(retryAfter) && retryAfter >= 0) return Math.min(retryAfter * 1000, 60000);
+  function backoffMs(attempt, err) {
+    const ms = parseFloat(err.retryAfterMs || '');
+    if (Number.isFinite(ms) && ms >= 0) return Math.min(ms, 60000);
+    const s = parseFloat(err.retryAfter || '');
+    if (Number.isFinite(s) && s >= 0) return Math.min(s * 1000, 60000);
     return Math.min(30000, 1000 * 2 ** attempt) + Math.floor(random() * 250);
   }
 
-  function buildRequest({ system, user, schema, maxTokens }) {
+  function buildRequest({ system, user, schema, schemaName, maxTokens }) {
     const body = {
       model: config.model,
-      max_tokens: maxTokens || 16000,
-      system,
-      messages: [{ role: 'user', content: user }],
-      output_config: { format: { type: 'json_schema', schema } },
+      instructions: system,
+      input: [{ role: 'user', content: user }],
+      text: { format: { type: 'json_schema', name: schemaName || 'structured_output', schema, strict: true } },
+      // Reasoning models spend output tokens on reasoning too; leave room so the JSON is not cut off.
+      max_output_tokens: maxTokens || 32000,
+      // Do not keep flood reports on the provider side beyond what the request itself requires.
+      store: false,
     };
-    if (supportsEffort(config.model)) body.output_config.effort = 'high';
-    const headers = {
-      'content-type': 'application/json',
-      'x-api-key': config.apiKey,
-      'anthropic-version': ANTHROPIC_VERSION,
+    return {
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${config.apiKey}` },
+      body: JSON.stringify(body),
     };
-    if (firstParty && FALLBACK_MODELS.has(config.model)) {
-      body.fallbacks = 'default';
-      headers['anthropic-beta'] = FALLBACK_BETA;
+  }
+
+  function httpError(status, text, headers) {
+    let error = {};
+    try { error = JSON.parse(text).error || {}; } catch { /* non-JSON error body */ }
+    const requestId = headers.get('x-request-id');
+    const detail = error.message ? `: ${redact(error.message, config.apiKey).slice(0, 200)}` : '';
+    const msg = `AI HTTP ${status}${error.code ? ` (${error.code})` : ''}${detail}`;
+    const opts = { status, requestId };
+    if (status === 401) return new AiError('auth', msg, opts);
+    if (status === 403) return new AiError('permission', msg, opts);
+    if (status === 404) return new AiError('not_found', msg, opts);
+    if (status === 429) {
+      if (QUOTA_CODES.has(error.code) || QUOTA_CODES.has(error.type)) return new AiError('quota_exceeded', msg, opts);
+      return Object.assign(new AiError('rate_limited', msg, { ...opts, retryable: true }), {
+        retryAfter: headers.get('retry-after'), retryAfterMs: headers.get('retry-after-ms'),
+      });
     }
-    return { headers, body: JSON.stringify(body) };
+    if (status === 408 || status === 409 || status >= 500) {
+      return Object.assign(new AiError(status === 408 ? 'timeout' : 'unavailable', msg, { ...opts, retryable: true }), {
+        retryAfter: headers.get('retry-after'), retryAfterMs: headers.get('retry-after-ms'),
+      });
+    }
+    return new AiError('bad_request', msg, opts);
+  }
+
+  /** Pulls the JSON text out of a Responses API result, or throws a typed AiError. */
+  function outputText(response, requestId) {
+    const items = Array.isArray(response.output) ? response.output : [];
+    const content = items.filter((i) => i && i.type === 'message').flatMap((i) => (Array.isArray(i.content) ? i.content : []));
+    const refusal = content.find((c) => c && c.type === 'refusal');
+    if (refusal) {
+      throw new AiError('refusal', `AI declined the request: ${redact(refusal.refusal || '', config.apiKey).slice(0, 200)}`, { requestId });
+    }
+    if (response.status === 'incomplete') {
+      const reason = response.incomplete_details && response.incomplete_details.reason;
+      if (reason === 'content_filter') throw new AiError('refusal', 'AI output was blocked by a content filter', { requestId });
+      throw new AiError('malformed_output', `AI output was incomplete (${reason || 'unknown reason'})`, { retryable: true, requestId });
+    }
+    if (response.status && response.status !== 'completed') {
+      const err = response.error || {};
+      throw new AiError('unavailable', `AI response status ${response.status}${err.code ? ` (${err.code})` : ''}`, { retryable: true, requestId });
+    }
+    const text = content.filter((c) => c && c.type === 'output_text').map((c) => c.text).join('');
+    if (!text.trim()) throw new AiError('malformed_output', 'AI response contained no output text', { retryable: true, requestId });
+    return text;
   }
 
   /** One HTTP attempt. Resolves to the validated JSON, or throws AiError. */
@@ -118,52 +170,39 @@ function createAiClient(config = configFromEnv(), deps = {}) {
       text = await res.text();
     } catch (err) {
       if (controller.signal.aborted) throw new AiError('timeout', `AI request timed out after ${config.timeoutMs} ms`, { retryable: true });
-      throw new AiError('unavailable', `AI request failed: ${err.message}`, { retryable: true });
+      throw new AiError('unavailable', `AI request failed: ${redact(err.message, config.apiKey)}`, { retryable: true });
     } finally {
       clearTimeout(timer);
     }
 
-    if (!res.ok) {
-      let detail = '';
-      try { detail = (JSON.parse(text).error || {}).message || ''; } catch { /* non-JSON error body */ }
-      const msg = `AI HTTP ${res.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`;
-      const s = res.status;
-      if (s === 429) throw Object.assign(new AiError('rate_limited', msg, { retryable: true, status: s }), { retryAfter: res.headers.get('retry-after') });
-      if (s === 408 || s === 409 || s >= 500) throw Object.assign(new AiError('unavailable', msg, { retryable: true, status: s }), { retryAfter: res.headers.get('retry-after') });
-      if (s === 401 || s === 403) throw new AiError('auth', msg, { status: s });
-      throw new AiError('bad_request', msg, { status: s });
-    }
+    if (!res.ok) throw httpError(res.status, text, res.headers);
+    const requestId = res.headers.get('x-request-id');
 
-    let message;
-    try { message = JSON.parse(text); } catch {
-      throw new AiError('malformed_output', 'AI response body is not JSON', { retryable: true, status: res.status });
+    let response;
+    try { response = JSON.parse(text); } catch {
+      throw new AiError('malformed_output', 'AI response body is not JSON', { retryable: true, status: res.status, requestId });
     }
-    if (message.stop_reason === 'refusal') {
-      const category = message.stop_details && message.stop_details.category;
-      throw new AiError('refusal', `AI declined the request${category ? ` (${category})` : ''}`);
-    }
-    if (message.stop_reason === 'max_tokens') {
-      throw new AiError('malformed_output', 'AI output was truncated (max_tokens)', { retryable: true });
-    }
-    const output = (message.content || []).filter((b) => b && b.type === 'text').map((b) => b.text).join('');
     let data;
-    try { data = JSON.parse(output); } catch {
-      throw new AiError('malformed_output', 'AI output is not valid JSON', { retryable: true });
+    try { data = JSON.parse(outputText(response, requestId)); } catch (err) {
+      if (err instanceof AiError) throw err;
+      throw new AiError('malformed_output', 'AI output is not valid JSON', { retryable: true, requestId });
     }
+    // Structured Outputs constrain the shape; our own validator still decides what is acceptable.
     const problems = validateFn ? validateFn(data) : [];
     if (problems.length) {
-      throw new AiError('invalid_schema', `AI output failed validation: ${problems.slice(0, 3).join('; ')}`, { retryable: true });
+      throw new AiError('invalid_schema', `AI output failed validation: ${problems.slice(0, 3).join('; ')}`, { retryable: true, requestId });
     }
-    return { data, servedModel: message.model || config.model, usage: message.usage || null };
+    return { data, servedModel: response.model || config.model, usage: response.usage || null, requestId };
   }
 
   /**
    * Requests a JSON object matching `schema`, validated by `validate(data) -> string[]`.
-   * @returns {Promise<{ data, model, servedModel, usage, attempts }>}
+   * @returns {Promise<{ data, model, servedModel, usage, attempts, requestId }>}
    */
-  async function generateJson({ system, user, schema, validate, maxTokens }) {
+  async function generateJson({ system, user, schema, schemaName, validate, maxTokens }) {
+    if (!supported) throw new AiError('not_configured', `AI_PROVIDER "${provider}" is not supported (use "openai")`);
     if (!config.apiKey) throw new AiError('not_configured', 'AI_API_KEY is not configured');
-    const request = buildRequest({ system, user, schema, maxTokens });
+    const request = buildRequest({ system, user, schema, schemaName, maxTokens });
     const maxAttempts = config.maxRetries + 1;
     let lastError;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -171,11 +210,11 @@ function createAiClient(config = configFromEnv(), deps = {}) {
         const result = await attemptOnce(request, validate);
         return { ...result, model: config.model, attempts: attempt + 1 };
       } catch (err) {
-        lastError = err instanceof AiError ? err : new AiError('unavailable', err.message, { retryable: true });
+        lastError = err instanceof AiError ? err : new AiError('unavailable', redact(err.message, config.apiKey), { retryable: true });
         lastError.attempts = attempt + 1;
         if (!lastError.retryable || attempt === maxAttempts - 1) break;
-        const wait = backoffMs(attempt, lastError.retryAfter);
-        log(`ai attempt ${attempt + 1}/${maxAttempts} failed (${lastError.code}); retrying in ${wait} ms`);
+        const wait = backoffMs(attempt, lastError);
+        log(`ai attempt ${attempt + 1}/${maxAttempts} failed (${lastError.code}${lastError.status ? ` HTTP ${lastError.status}` : ''}); retrying in ${wait} ms`);
         await sleep(wait);
       }
     }
@@ -183,10 +222,12 @@ function createAiClient(config = configFromEnv(), deps = {}) {
   }
 
   return {
-    get isConfigured() { return Boolean(config.apiKey); },
+    get isConfigured() { return supported && Boolean(config.apiKey); },
+    provider,
     model: config.model,
+    endpoint,
     generateJson,
   };
 }
 
-module.exports = { createAiClient, configFromEnv, AiError, messagesEndpoint, DEFAULT_MODEL };
+module.exports = { createAiClient, configFromEnv, AiError, responsesEndpoint, redact, DEFAULT_MODEL, DEFAULT_PROVIDER };

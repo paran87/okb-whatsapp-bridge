@@ -7,7 +7,7 @@
  * message-specific goes in the user turn.
  */
 
-const PROMPT_VERSION = 'flood-extract-v1';
+const PROMPT_VERSION = 'flood-extract-v2';
 
 const SYSTEM_PROMPT = `You extract structured data from flood reports that DPWH (Philippine Department of Public Works and Highways) field offices post in WhatsApp and Viber group chats. Your answer is stored as structured data for an operations center and checked by human reviewers, so a wrong value is worse than a missing one.
 
@@ -30,7 +30,7 @@ Every field is an object {"raw": ..., "status": ...}:
 - "not_applicable": the source explicitly says N/A, "not applicable", or "-" for that field. raw is that text.
 - "ambiguous": the source contains something for this field but you cannot tell what it means or which field it belongs to. raw is the source text.
 
-Extract only what the source states. Missing values are normal: most reports leave several fields out, and that does not make the report invalid. Use "missing" rather than estimating, assuming, or inferring. In particular:
+Extract only what the source states. Missing values are normal: most reports leave several fields out, and that does not make the report invalid. Use "missing" rather than estimating, assuming, or inferring something because it is likely or typical. This applies to every kind of information: dates, times, rainfall, water levels, locations, flood start and end, coordinates, road status, damages, casualties, and actions taken. In particular:
 - Never fill a field from a different field: flood start is not rainfall start; flood subsided is not rainfall end; maximum flood height is not current flood height; inspection time is not report time.
 - Never infer coordinates from a landmark or road, a municipality from a road name, a province from a municipality, or a date or time from anything other than the text that states it. You are not given the message's received time and must not guess one.
 - Never estimate flood height from photos or descriptions. A description like "knee-deep" is "provided" for raw text but it is not a number; keep the text as written.

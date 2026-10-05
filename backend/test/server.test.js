@@ -5,10 +5,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { createServer } = require('../server');
+const { offlineAi } = require('./helpers/flood-fixtures');
 
 async function start(opts = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'okb-backend-'));
-  const server = createServer({ dataDir, tokens: ['secret-token'], log: () => {}, ...opts });
+  const server = createServer({ dataDir, tokens: ['secret-token'], log: () => {}, ai: offlineAi(), ...opts });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
   return { server, base, dataDir };
@@ -65,7 +66,7 @@ test('message is stored once and duplicates return the same id', async () => {
   server.close();
 
   // Restart: dedupe index is rebuilt from disk.
-  const restarted = createServer({ dataDir, tokens: ['secret-token'], log: () => {} });
+  const restarted = createServer({ dataDir, tokens: ['secret-token'], log: () => {}, ai: offlineAi() });
   await new Promise((r) => restarted.listen(0, '127.0.0.1', r));
   const res = await fetch(`http://127.0.0.1:${restarted.address().port}/api/v1/messages`, {
     method: 'POST', headers: auth, body: JSON.stringify(message),
@@ -97,5 +98,5 @@ test('device registration', async () => {
 });
 
 test('refuses to start without tokens unless explicitly allowed', () => {
-  assert.throws(() => createServer({ dataDir: os.tmpdir(), tokens: [], allowNoAuth: false, log: () => {} }));
+  assert.throws(() => createServer({ dataDir: os.tmpdir(), tokens: [], allowNoAuth: false, log: () => {}, ai: offlineAi() }));
 });

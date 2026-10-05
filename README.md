@@ -799,23 +799,50 @@ the existing JSON/JSONL storage convention of the reference backend.
 
 ### Configure AI (server-side only)
 
-Add to `backend/.env` (see `.env.example`). The key never reaches the phone:
+Add to `backend/.env` (copy `.env.example`; `.env` is git-ignored). The key never reaches the phone,
+is never logged, and must never be committed:
 
 ```
-AI_API_KEY=your-anthropic-api-key
-# AI_BASE_URL=https://api.anthropic.com
-# AI_MODEL=claude-opus-5-5
-# AI_TIMEOUT_MS=120000
-# AI_MAX_RETRIES=2
+AI_PROVIDER=openai
+AI_API_KEY=your-openai-api-key
+AI_BASE_URL=https://api.openai.com
+AI_MODEL=gpt-5.6-luna
+AI_TIMEOUT_MS=120000
+AI_MAX_RETRIES=2
+OKB_REPORT_AUTO_PROCESS=1
 OKB_ADMIN_TOKENS=a-separate-long-random-operator-token
 ```
 
-The client (`lib/ai.js`) calls the Claude Messages API with structured JSON output. Timeouts, 429
-(honouring `retry-after`), 5xx/overload and malformed output are retried at most `AI_MAX_RETRIES`
-times with exponential backoff; authentication and bad-request errors are not retried. Without
+The client (`lib/ai.js`, dependency-free) calls the **OpenAI Responses API** (`POST /v1/responses`)
+with **Structured Outputs** (`text.format` = strict `json_schema` built from `lib/flood/schema.js`) and
+`store: false`. The provider-side schema is not trusted on its own: every answer is validated again
+locally, then normalized and checked by the anti-fabrication rules exactly as before.
+
+| Failure | Handling |
+|---|---|
+| timeout, network error, 408, 409, 500, 502, 503, rate-limit 429 | retried with exponential backoff (honours `retry-after`/`retry-after-ms`), at most `AI_MAX_RETRIES` times, then `failed` |
+| malformed JSON, empty or truncated output, answer failing local validation | retried within the same budget, then `failed` |
+| 401 (bad key), 403, 404 (e.g. model not available), 400, quota/billing 429 (`insufficient_quota`, spend limits), refusal / content filter | not retried; `failed` with the reason |
+
+Processing logs record the error code, HTTP status and OpenAI request id (`x-request-id`), never the
+key; key-like strings in provider messages are redacted. Without
 `AI_API_KEY`, everything else keeps working: messages and media are stored, system notifications and
 greetings are filtered, and other reports wait in `received` until AI is configured (they are queued
 automatically on the next start). `GET /api/v1/health` reports `"reports": {"ai": "configured"}`.
+
+### AI smoke test (one real call)
+
+```
+cd backend
+npm run smoke:ai            # ONE request with a fictional sample report, checks the result
+npm run smoke:ai -- --dry   # configuration check only, no request
+```
+
+It reads `backend/.env`, sends a single made-up report (no real DPWH data, no message history) and runs
+the answer through the normal pipeline. It passes when the key and model are accepted, the answer
+parses and passes the local validator, and values the sample does not state (flood start, maximum
+height, coordinates, report time) stay `null`, with `".010 m"` left un-normalized and the report in
+`needs_review`. Exit code `0` = passed, `1` = failed, `2` = not configured. The key is never printed.
 
 ### Phase 3 acceptance test (physical device)
 

@@ -174,7 +174,9 @@ function createReportService(opts) {
           return save(working, { ...working, status: REPORT_STATUS.RECEIVED });
         }
         const code = err.code || 'internal_error';
-        logEvent(working, 'ai_failed', { code, attempts: err.attempts || null });
+        logEvent(working, 'ai_failed', {
+          code, attempts: err.attempts || null, httpStatus: err.status || null, requestId: err.requestId || null,
+        });
         return fail(working, code, err.code ? err.message : 'unexpected processing error', trigger);
       }
 
@@ -184,6 +186,7 @@ function createReportService(opts) {
       if (result.extraction) {
         logEvent(working, 'extraction_completed', {
           locations: result.extraction.locations.length, aiAttempts: result.metadata.aiAttempts,
+          model: result.metadata.servedModel || result.metadata.model, requestId: result.metadata.aiRequestId || null,
         });
         logEvent(working, 'validation_completed', {
           missing: result.metadata.missingFields.length,

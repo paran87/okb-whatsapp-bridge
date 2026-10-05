@@ -35,8 +35,8 @@
  *   OKB_ADMIN_TOKENS    comma-separated bearer tokens for the /reports endpoints. When unset, device tokens
  *                       are accepted there too (same as the existing operator-verification endpoints).
  *   OKB_REPORT_AUTO_PROCESS  "0" to disable automatic report processing of new messages (default on)
- *   AI_API_KEY, AI_BASE_URL, AI_MODEL, AI_TIMEOUT_MS, AI_MAX_RETRIES
- *                       server-side AI used for flood-report extraction (see lib/ai.js). Without AI_API_KEY,
+ *   AI_PROVIDER, AI_API_KEY, AI_BASE_URL, AI_MODEL, AI_TIMEOUT_MS, AI_MAX_RETRIES
+ *                       server-side AI (OpenAI Responses API) used for flood-report extraction (see lib/ai.js). Without AI_API_KEY,
  *                       messages are still stored and deterministic filtering still runs; AI-dependent
  *                       reports wait in status "received".
  *   R2_ACCOUNT_ID, R2_BUCKET_NAME, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
@@ -47,7 +47,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { createR2Client } = require('./lib/r2');
-const { createAiClient } = require('./lib/ai');
+const { createAiClient, configFromEnv } = require('./lib/ai');
 const { createReportService } = require('./lib/reports');
 const { resolvePlatform, messageDedupeKey, platformOfRecord } = require('./lib/sources');
 
@@ -576,7 +576,8 @@ if (require.main === module) {
   const host = process.env.HOST || '0.0.0.0';
   const server = createServer();
   const mode = process.env.R2_ACCOUNT_ID ? 'R2' : 'local-sink (DEV)';
-  const ai = process.env.AI_API_KEY ? `AI ${process.env.AI_MODEL || 'claude-opus-5-5'}` : 'AI not configured (reports wait in "received")';
+  const aiConfig = configFromEnv();
+  const ai = aiConfig.apiKey ? `AI ${aiConfig.provider} ${aiConfig.model}` : 'AI not configured (reports wait in "received")';
   server.listen(port, host, () => console.log(`OKB bridge reference backend listening on http://${host}:${port} — media: ${mode} — reports: ${ai}`));
   if (!process.env.OKB_ADMIN_TOKENS) {
     console.log('note: OKB_ADMIN_TOKENS is not set, so device tokens can also read and review flood reports.');

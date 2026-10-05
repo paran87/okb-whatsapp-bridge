@@ -88,11 +88,12 @@ const LOCATION_GROUPS = Object.freeze({
 });
 
 // ---------------------------------------------------------------------------------------------------
-// JSON schema for the AI answer (subset supported by structured outputs: every object closed with
-// additionalProperties:false and every property required; no numeric/string-length constraints).
+// JSON schema for the AI answer, in the subset OpenAI Structured Outputs accepts in strict mode: every
+// object closed with additionalProperties:false, every property required, nullable values written as a
+// type array (no anyOf), no numeric/string-length constraints.
 // ---------------------------------------------------------------------------------------------------
 
-const nullableString = { anyOf: [{ type: 'string' }, { type: 'null' }] };
+const nullableString = { type: ['string', 'null'] };
 
 const AI_FIELD = {
   type: 'object',
@@ -133,8 +134,10 @@ const AI_OUTPUT_SCHEMA = closedObject({
 });
 
 // ---------------------------------------------------------------------------------------------------
-// Minimal validator for the schema subset above (type, enum, properties, required,
-// additionalProperties:false, items, anyOf). Dependency-free, like the rest of the backend.
+// Minimal validator for the schema subset above (type or type array, enum, properties, required,
+// additionalProperties:false, items, anyOf). Dependency-free, like the rest of the backend. It runs on
+// every AI answer even though the provider enforces the same schema: provider-side enforcement is not
+// a substitute for our own check.
 // ---------------------------------------------------------------------------------------------------
 
 function typeOf(v) {
@@ -151,13 +154,14 @@ function validate(schema, value, path = '$', errors = []) {
     return errors;
   }
   const t = typeOf(value);
-  const expected = schema.type;
-  if (expected && !(t === expected || (expected === 'number' && t === 'integer'))) {
-    errors.push(`${path}: expected ${expected}, got ${t}`);
+  const types = schema.type === undefined ? null : [].concat(schema.type);
+  if (types && !types.some((e) => t === e || (e === 'number' && t === 'integer'))) {
+    errors.push(`${path}: expected ${types.join('|')}, got ${t}`);
     return errors;
   }
+  const expected = types && types.includes(t) ? t : types && types[0];
   if (schema.enum && !schema.enum.includes(value)) errors.push(`${path}: value not in enum`);
-  if (expected === 'object') {
+  if (expected === 'object' && t === 'object') {
     for (const key of schema.required || []) {
       if (!Object.prototype.hasOwnProperty.call(value, key)) errors.push(`${path}.${key}: required`);
     }
@@ -170,7 +174,7 @@ function validate(schema, value, path = '$', errors = []) {
       validate(sub, v, `${path}.${key}`, errors);
     }
   }
-  if (expected === 'array' && schema.items) value.forEach((item, i) => validate(schema.items, item, `${path}[${i}]`, errors));
+  if (expected === 'array' && t === 'array' && schema.items) value.forEach((item, i) => validate(schema.items, item, `${path}[${i}]`, errors));
   return errors;
 }
 

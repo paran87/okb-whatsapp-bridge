@@ -162,6 +162,7 @@ async function extractReport(source, { ai }) {
     system: SYSTEM_PROMPT,
     user: buildUserMessage(source, pre.text),
     schema: AI_OUTPUT_SCHEMA,
+    schemaName: 'flood_report_extraction',
     validate: validateAiOutput,
   });
   const out = response.data;
@@ -178,6 +179,7 @@ async function extractReport(source, { ai }) {
     promptVersion: PROMPT_VERSION,
     schemaVersion: SCHEMA_VERSION,
     aiAttempts: response.attempts,
+    aiRequestId: response.requestId || null,
   };
 
   if (classification.reportType === 'not_flood_report') {
