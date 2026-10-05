@@ -89,6 +89,13 @@ class RoomMediaRepository(
     override suspend fun resetFailedToPending(at: Long): Int = dao.resetFailedToPending(at)
     override suspend fun repairQueue(now: Long) = dao.repairQueue(now)
 
+    override suspend fun deleteForMessages(messageIds: Collection<String>): Int =
+        messageIds.chunked(500).sumOf { chunk ->
+            // Files are per media row (<mediaId>.<ext>), never shared, so this cannot affect other messages.
+            dao.localPathsForMessages(chunk).forEach { store.delete(it) }
+            dao.deleteForMessages(chunk)
+        }
+
     override suspend fun cleanupUploadedLocalFiles(cutoff: Long, at: Long): Int {
         val paths = dao.localPathsToCleanup(cutoff)
         paths.forEach { store.delete(it) }

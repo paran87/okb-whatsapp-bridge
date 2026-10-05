@@ -113,6 +113,24 @@ class RoomMessageRepository(
 
     override suspend fun deleteUploadedBefore(cutoff: Long): Int = dao.deleteUploadedBefore(cutoff)
 
+    override suspend fun moveToRecycleBin(ids: Collection<String>, at: Long): Int =
+        ids.chunked(CHUNK).sumOf { dao.moveToBin(it, at) }
+
+    override suspend fun restoreFromRecycleBin(ids: Collection<String>): Int =
+        ids.chunked(CHUNK).sumOf { dao.restoreFromBin(it) }
+
+    override fun observeRecycleBin(limit: Int): Flow<List<BridgeMessage>> =
+        dao.observeBin(limit).map { rows -> rows.map { it.toDomain() } }
+
+    override fun observeRecycleBinCount(): Flow<Int> = dao.observeBinCount()
+
+    override suspend fun recycleBinIdsDeletedBefore(cutoff: Long): List<String> = dao.binIdsDeletedBefore(cutoff)
+
+    override suspend fun purgeFromRecycleBin(ids: Collection<String>, at: Long): Int =
+        ids.chunked(CHUNK).sumOf { dao.purgeFromBin(it, at) }
+
+    override suspend fun deleteTombstonesBefore(cutoff: Long): Int = dao.deleteTombstonesBefore(cutoff)
+
     override suspend fun isDatabaseHealthy(): Boolean = runCatching {
         settingsDao.ping() == 1 && dao.countAll() >= 0
     }.getOrDefault(false)
@@ -132,5 +150,11 @@ class RoomMessageRepository(
         uploadedAt = message.uploadedAt,
         lastError = message.lastError,
         attemptCount = attemptCount,
+        deletedAt = message.deletedAt,
     )
+
+    private companion object {
+        /** Stays well below SQLite's bound-parameter limit for IN (...) lists. */
+        const val CHUNK = 500
+    }
 }

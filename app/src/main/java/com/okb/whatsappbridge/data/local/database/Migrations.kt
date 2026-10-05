@@ -63,5 +63,14 @@ object Migrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2)
+    /** v2 → v3: Recycle Bin. Two nullable columns on messages; every existing row stays as it is (not deleted). */
+    val MIGRATION_2_3 = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `messages` ADD COLUMN `deletedAt` INTEGER DEFAULT NULL")
+            db.execSQL("ALTER TABLE `messages` ADD COLUMN `purgedAt` INTEGER DEFAULT NULL")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_messages_deletedAt` ON `messages` (`deletedAt`)")
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
 }

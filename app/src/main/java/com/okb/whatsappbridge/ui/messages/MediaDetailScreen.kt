@@ -1,6 +1,20 @@
 package com.okb.whatsappbridge.ui.messages
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.RestoreFromTrash
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import com.okb.whatsappbridge.ui.components.ButtonRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,9 +40,27 @@ import com.okb.whatsappbridge.ui.components.StatusLine
 import com.okb.whatsappbridge.source.SourcePlatform
 
 @Composable
-fun MediaDetailScreen(viewModel: MediaDetailViewModel) {
+fun MediaDetailScreen(viewModel: MediaDetailViewModel, onDeleted: () -> Unit = {}) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val narrow = Modifier.widthIn(max = 900.dp)
+    var confirmDelete by remember { mutableStateOf(false) }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Move this message to the Recycle Bin?") },
+            text = {
+                Text(
+                    "It stays in the Recycle Bin for 30 days and can be restored. If it has not been uploaded yet, it is " +
+                        "not uploaded while it is in the bin. A copy already uploaded to the backend is not deleted.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmDelete = false; viewModel.moveToRecycleBin(onDeleted) }) { Text("Move to Recycle Bin") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+        )
+    }
 
     LazyColumn(
         contentPadding = PaddingValues(16.dp),
@@ -50,6 +82,30 @@ fun MediaDetailScreen(viewModel: MediaDetailViewModel) {
                 SectionDivider()
                 Text("Caption / text", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(message.messageText?.ifBlank { "(no text)" } ?: "(no text)", style = MaterialTheme.typography.bodyMedium)
+                SectionDivider()
+                val deletedAt = message.deletedAt
+                if (deletedAt == null) {
+                    ButtonRow {
+                        OutlinedButton(onClick = { confirmDelete = true }) {
+                            Icon(Icons.Filled.Delete, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Move to Recycle Bin")
+                        }
+                    }
+                } else {
+                    Text(
+                        "In the Recycle Bin since ${Formatters.time(deletedAt)}.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                    ButtonRow {
+                        Button(onClick = viewModel::restore) {
+                            Icon(Icons.Filled.RestoreFromTrash, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Restore")
+                        }
+                    }
+                }
             }
         }
         if (state.media.isEmpty()) {

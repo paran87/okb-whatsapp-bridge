@@ -56,21 +56,71 @@ abstract class MessageDao {
         """
         SELECT m.*, COALESCE(q.attemptCount, 0) AS attemptCount
         FROM messages m LEFT JOIN upload_queue q ON q.messageId = m.id
-        WHERE (:status IS NULL OR m.uploadStatus = :status)
-        ORDER BY m.timestamp DESC, m.createdAt DESC
+        WHERE m.deletedAt IS NULL AND (:status IS NULL OR m.uploadStatus = :status)
+        ORDER BY m.timestamp DESC, m.createdAt DESC, m.rowid DESC
         LIMIT :limit
         """,
     )
     abstract fun observeRecent(status: String?, limit: Int): Flow<List<MessageWithQueue>>
 
-    @Query("SELECT uploadStatus AS status, COUNT(*) AS count FROM messages GROUP BY uploadStatus")
+    @Query("SELECT uploadStatus AS status, COUNT(*) AS count FROM messages WHERE deletedAt IS NULL GROUP BY uploadStatus")
     abstract fun observeStatusCounts(): Flow<List<StatusCount>>
 
-    @Query("SELECT COUNT(*) FROM messages WHERE createdAt >= :since")
+    @Query("SELECT COUNT(*) FROM messages WHERE deletedAt IS NULL AND createdAt >= :since")
     abstract fun observeCountSince(since: Long): Flow<Int>
 
-    @Query("SELECT MAX(timestamp) FROM messages")
+    @Query("SELECT MAX(timestamp) FROM messages WHERE deletedAt IS NULL")
     abstract fun observeLatestTimestamp(): Flow<Long?>
+
+    // ---- Recycle Bin ----
+
+    @Query("UPDATE messages SET deletedAt = :at WHERE id IN (:ids) AND deletedAt IS NULL")
+    abstract suspend fun moveToBin(ids: List<String>, at: Long): Int
+
+    @Query("UPDATE messages SET deletedAt = NULL WHERE id IN (:ids) AND deletedAt IS NOT NULL AND purgedAt IS NULL")
+    abstract suspend fun restoreFromBin(ids: List<String>): Int
+
+    @Query(
+        """
+        SELECT m.*, COALESCE(q.attemptCount, 0) AS attemptCount
+        FROM messages m LEFT JOIN upload_queue q ON q.messageId = m.id
+        WHERE m.deletedAt IS NOT NULL AND m.purgedAt IS NULL
+        ORDER BY m.deletedAt DESC, m.timestamp DESC, m.rowid DESC
+        LIMIT :limit
+        """,
+    )
+    abstract fun observeBin(limit: Int): Flow<List<MessageWithQueue>>
+
+    @Query("SELECT COUNT(*) FROM messages WHERE deletedAt IS NOT NULL AND purgedAt IS NULL")
+    abstract fun observeBinCount(): Flow<Int>
+
+    /** Ids in the bin (not yet purged) deleted before [cutoff]. */
+    @Query("SELECT id FROM messages WHERE deletedAt IS NOT NULL AND purgedAt IS NULL AND deletedAt < :cutoff")
+    abstract suspend fun binIdsDeletedBefore(cutoff: Long): List<String>
+
+    /** Turns bin rows into content-free tombstones; only the fingerprint (a one-way hash) remains. */
+    @Query(
+        """
+        UPDATE messages SET purgedAt = :at, messageText = NULL, senderName = NULL, groupName = NULL,
+            notificationKey = NULL, lastError = NULL
+        WHERE id IN (:ids) AND deletedAt IS NOT NULL AND purgedAt IS NULL
+        """,
+    )
+    protected abstract suspend fun scrubBinRows(ids: List<String>, at: Long): Int
+
+    @Query("DELETE FROM upload_queue WHERE messageId IN (:ids)")
+    protected abstract suspend fun deleteQueueEntries(ids: List<String>)
+
+    @Transaction
+    open suspend fun purgeFromBin(ids: List<String>, at: Long): Int {
+        val count = scrubBinRows(ids, at)
+        deleteQueueEntries(ids)
+        return count
+    }
+
+    /** Tombstones are only needed while a notification could still be re-posted. */
+    @Query("DELETE FROM messages WHERE purgedAt IS NOT NULL AND purgedAt < :cutoff")
+    abstract suspend fun deleteTombstonesBefore(cutoff: Long): Int
 
     /**
      * Next messages to upload, oldest first. FAILED messages are only included for reconciliation or
@@ -80,7 +130,7 @@ abstract class MessageDao {
         """
         SELECT m.*, q.attemptCount AS attemptCount
         FROM messages m INNER JOIN upload_queue q ON q.messageId = m.id
-        WHERE m.id NOT IN (:excludedIds)
+        WHERE m.id NOT IN (:excludedIds) AND m.deletedAt IS NULL
           AND (
             m.uploadStatus IN ('PENDING_UPLOAD', 'RETRYING', 'UPLOADING')
             OR (:includeFailed AND m.uploadStatus = 'FAILED' AND q.attemptCount < :maxFailedAttempts)
@@ -99,8 +149,9 @@ abstract class MessageDao {
     @Query(
         """
         SELECT COUNT(*) FROM messages m INNER JOIN upload_queue q ON q.messageId = m.id
-        WHERE m.uploadStatus IN ('PENDING_UPLOAD', 'RETRYING', 'UPLOADING')
-          OR (:includeFailed AND m.uploadStatus = 'FAILED' AND q.attemptCount < :maxFailedAttempts)
+        WHERE m.deletedAt IS NULL AND (
+          m.uploadStatus IN ('PENDING_UPLOAD', 'RETRYING', 'UPLOADING')
+          OR (:includeFailed AND m.uploadStatus = 'FAILED' AND q.attemptCount < :maxFailedAttempts))
         """,
     )
     abstract suspend fun countUploadable(includeFailed: Boolean, maxFailedAttempts: Int): Int
@@ -170,7 +221,7 @@ abstract class MessageDao {
         """
         INSERT OR IGNORE INTO upload_queue (messageId, enqueuedAt, attemptCount)
         SELECT id, :now, 0 FROM messages
-        WHERE uploadStatus != 'UPLOADED' AND id NOT IN (SELECT messageId FROM upload_queue)
+        WHERE uploadStatus != 'UPLOADED' AND deletedAt IS NULL AND id NOT IN (SELECT messageId FROM upload_queue)
         """,
     )
     abstract suspend fun repairQueue(now: Long)

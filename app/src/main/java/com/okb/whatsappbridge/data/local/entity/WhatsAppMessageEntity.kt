@@ -17,6 +17,7 @@ import androidx.room.PrimaryKey
         Index(value = ["uploadStatus"]),
         Index(value = ["createdAt"]),
         Index(value = ["fingerprint"], unique = true),
+        Index(value = ["deletedAt"]),
     ],
 )
 data class WhatsAppMessageEntity(
@@ -38,4 +39,11 @@ data class WhatsAppMessageEntity(
     val notificationKey: String?,
     @ColumnInfo(defaultValue = "NULL") val uploadedAt: Long? = null,
     @ColumnInfo(defaultValue = "NULL") val lastError: String? = null,
+    /** When the operator moved the message to the Recycle Bin; null = not deleted. */
+    @ColumnInfo(defaultValue = "NULL") val deletedAt: Long? = null,
+    /**
+     * When it was deleted forever. The row is then only a content-free tombstone (text, sender and
+     * media removed) kept briefly so a re-posted notification cannot capture the message again.
+     */
+    @ColumnInfo(defaultValue = "NULL") val purgedAt: Long? = null,
 )

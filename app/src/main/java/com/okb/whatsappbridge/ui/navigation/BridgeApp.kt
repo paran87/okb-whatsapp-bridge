@@ -22,8 +22,10 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -61,6 +63,8 @@ import com.okb.whatsappbridge.ui.messages.MediaDetailScreen
 import com.okb.whatsappbridge.ui.messages.MediaDetailViewModel
 import com.okb.whatsappbridge.ui.messages.MessagesScreen
 import com.okb.whatsappbridge.ui.messages.MessagesViewModel
+import com.okb.whatsappbridge.ui.messages.RecycleBinScreen
+import com.okb.whatsappbridge.ui.messages.RecycleBinViewModel
 import com.okb.whatsappbridge.ui.settings.SettingsScreen
 import com.okb.whatsappbridge.ui.sync.SyncScreen
 import com.okb.whatsappbridge.ui.theme.MonoFamily
@@ -77,6 +81,7 @@ private enum class TopLevel(val route: String, val label: String, val icon: Imag
 private const val ROUTE_DIAGNOSTICS = "diagnostics"
 private const val ROUTE_LOGS = "logs"
 private const val ROUTE_MESSAGE_DETAIL = "message"
+private const val ROUTE_RECYCLE_BIN = "recycle_bin"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -158,6 +163,7 @@ fun BridgeApp(container: AppContainer) {
                                     when (currentRoute) {
                                         ROUTE_DIAGNOSTICS -> "Diagnostics"
                                         ROUTE_LOGS -> "Event log"
+                        ROUTE_RECYCLE_BIN -> "Recycle Bin"
                                         else -> if (currentRoute?.startsWith(ROUTE_MESSAGE_DETAIL) == true) "Message detail" else topLevel?.label ?: ""
                                     } + "  ·  " + state.polled.deviceId,
                                     style = MaterialTheme.typography.labelSmall,
@@ -204,16 +210,46 @@ fun BridgeApp(container: AppContainer) {
                 }
                 composable(TopLevel.MESSAGES.route) {
                     val vm: MessagesViewModel = viewModel(
-                        factory = viewModelFactory { initializer { MessagesViewModel(container.messageRepository, container.mediaRepository) } },
+                        factory = viewModelFactory {
+                            initializer { MessagesViewModel(container.messageRepository, container.mediaRepository, container.recycleBin) }
+                        },
                     )
-                    MessagesScreen(vm, onOpenDetail = { id -> navController.navigate("$ROUTE_MESSAGE_DETAIL/$id") })
+                    LaunchedEffect(vm) {
+                        vm.events.collect { event ->
+                            val result = snackbar.showSnackbar(
+                                message = event.text,
+                                actionLabel = if (event.undoIds.isNotEmpty()) "Undo" else null,
+                                duration = SnackbarDuration.Short,
+                            )
+                            if (result == SnackbarResult.ActionPerformed) vm.undoDelete(event.undoIds)
+                        }
+                    }
+                    MessagesScreen(
+                        vm,
+                        onOpenDetail = { id -> navController.navigate("$ROUTE_MESSAGE_DETAIL/$id") },
+                        onOpenRecycleBin = { navController.navigate(ROUTE_RECYCLE_BIN) },
+                    )
+                }
+                composable(ROUTE_RECYCLE_BIN) {
+                    val vm: RecycleBinViewModel = viewModel(
+                        factory = viewModelFactory {
+                            initializer { RecycleBinViewModel(container.messageRepository, container.mediaRepository, container.recycleBin) }
+                        },
+                    )
+                    LaunchedEffect(vm) { vm.events.collect { snackbar.showSnackbar(it) } }
+                    RecycleBinScreen(vm)
                 }
                 composable("$ROUTE_MESSAGE_DETAIL/{id}") { entry ->
                     val id = entry.arguments?.getString("id").orEmpty()
                     val vm: MediaDetailViewModel = viewModel(
-                        factory = viewModelFactory { initializer { MediaDetailViewModel(id, container.messageRepository, container.mediaRepository) } },
+                        factory = viewModelFactory {
+                            initializer { MediaDetailViewModel(id, container.messageRepository, container.mediaRepository, container.recycleBin) }
+                        },
                     )
-                    MediaDetailScreen(vm)
+                    MediaDetailScreen(vm, onDeleted = {
+                        navController.popBackStack()
+                        statusViewModel.notify("Moved to the Recycle Bin")
+                    })
                 }
                 composable(TopLevel.GROUPS.route) {
                     val vm: GroupsViewModel = viewModel(

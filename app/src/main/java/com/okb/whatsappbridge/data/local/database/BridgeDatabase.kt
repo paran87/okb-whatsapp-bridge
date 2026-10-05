@@ -35,7 +35,7 @@ import com.okb.whatsappbridge.data.local.entity.WhatsAppMessageEntity
         MediaAttachmentEntity::class,
         MediaUploadQueueEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class BridgeDatabase : RoomDatabase() {

@@ -18,6 +18,8 @@ data class BridgeMessage(
     val attemptCount: Int,
     /** Linked media attachment summary, when the message carried a media indicator. */
     val media: MediaSummary? = null,
+    /** When the operator moved it to the Recycle Bin; null when it is not deleted. */
+    val deletedAt: Long? = null,
 )
 
 /** Compact media state shown next to a message in the list. */

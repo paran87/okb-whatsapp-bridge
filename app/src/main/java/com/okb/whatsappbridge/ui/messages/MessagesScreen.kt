@@ -1,8 +1,23 @@
 package com.okb.whatsappbridge.ui.messages
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,22 +60,65 @@ import com.okb.whatsappbridge.ui.theme.MonoValue
 import com.okb.whatsappbridge.source.SourcePlatform
 
 @Composable
-fun MessagesScreen(viewModel: MessagesViewModel, onOpenDetail: (String) -> Unit) {
+fun MessagesScreen(viewModel: MessagesViewModel, onOpenDetail: (String) -> Unit, onOpenRecycleBin: () -> Unit) {
     val filter by viewModel.filter.collectAsStateWithLifecycle()
     val messages by viewModel.messages.collectAsStateWithLifecycle()
+    val selected by viewModel.selected.collectAsStateWithLifecycle()
+    val binCount by viewModel.recycleBinCount.collectAsStateWithLifecycle()
+    var confirmDelete by remember { mutableStateOf(false) }
+    val selecting = selected.isNotEmpty()
+
+    BackHandler(enabled = selecting) { viewModel.clearSelection() }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Move ${selected.size} message(s) to the Recycle Bin?") },
+            text = {
+                Text(
+                    "They are kept in the Recycle Bin for 30 days and can be restored. Messages not yet uploaded " +
+                        "are not uploaded while they are in the bin. Copies already uploaded to the backend are not deleted.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmDelete = false; viewModel.deleteSelected() }) { Text("Move to Recycle Bin") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+        )
+    }
 
     Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            FilterChip(selected = filter == null, onClick = { viewModel.setFilter(null) }, label = { Text("All") })
-            UploadStatus.entries.forEach { status ->
-                FilterChip(
-                    selected = filter == status,
-                    onClick = { viewModel.setFilter(status) },
-                    label = { Text(status.label()) },
-                )
+        if (selecting) {
+            SelectionBar(
+                count = selected.size,
+                onSelectAll = viewModel::selectAll,
+                onCancel = viewModel::clearSelection,
+            ) {
+                Button(onClick = { confirmDelete = true }) {
+                    Icon(Icons.Filled.Delete, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Delete")
+                }
+            }
+        } else {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FilterChip(selected = filter == null, onClick = { viewModel.setFilter(null) }, label = { Text("All") })
+                UploadStatus.entries.forEach { status ->
+                    FilterChip(
+                        selected = filter == status,
+                        onClick = { viewModel.setFilter(status) },
+                        label = { Text(status.label()) },
+                    )
+                }
+                OutlinedButton(onClick = onOpenRecycleBin) {
+                    Icon(Icons.Filled.Delete, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (binCount > 0) "Recycle Bin ($binCount)" else "Recycle Bin")
+                }
             }
         }
         val list = messages
@@ -85,23 +143,63 @@ fun MessagesScreen(viewModel: MessagesViewModel, onOpenDetail: (String) -> Unit)
             ) {
                 item {
                     Text(
-                        "Showing the latest ${list.size} message(s) stored on this device",
+                        "Showing the latest ${list.size} message(s) stored on this device · long-press to select and delete",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                items(list, key = { it.id }) { MessageCard(it, onOpenDetail) }
+                items(list, key = { it.id }) { message ->
+                    MessageCard(
+                        message = message,
+                        selected = message.id in selected,
+                        onClick = { if (selecting) viewModel.toggleSelection(message.id) else onOpenDetail(message.id) },
+                        onLongClick = { viewModel.toggleSelection(message.id) },
+                    )
+                }
             }
         }
     }
 }
 
+/** Header shown while messages are selected: count, select all, cancel, plus screen-specific actions. */
 @Composable
-private fun MessageCard(message: BridgeMessage, onOpenDetail: (String) -> Unit) {
+internal fun SelectionBar(count: Int, onSelectAll: () -> Unit, onCancel: () -> Unit, actions: @Composable () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onCancel) { Icon(Icons.Filled.Close, contentDescription = "Cancel selection") }
+        Text("$count selected", style = MaterialTheme.typography.titleSmall)
+        TextButton(onClick = onSelectAll) { Text("Select all") }
+        actions()
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun MessageCard(
+    message: BridgeMessage,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    footer: String? = null,
+) {
+    val highlight = if (selected) {
+        Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
+    } else {
+        Modifier
+    }
     Panel(
         title = message.groupName ?: "Unknown group",
-        modifier = Modifier.widthIn(max = 900.dp).clickable { onOpenDetail(message.id) },
-        trailing = { StatusIndicator(message.uploadStatus.level(), message.uploadStatus.label()) },
+        modifier = Modifier.widthIn(max = 900.dp).then(highlight).combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        trailing = {
+            if (selected) {
+                Icon(Icons.Filled.CheckCircle, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary)
+            } else {
+                StatusIndicator(message.uploadStatus.level(), message.uploadStatus.label())
+            }
+        },
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -131,6 +229,10 @@ private fun MessageCard(message: BridgeMessage, onOpenDetail: (String) -> Unit) 
         Text(meta.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         message.lastError?.let {
             Text("Last error: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
+        footer?.let {
+            Spacer(Modifier.height(4.dp))
+            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
         }
     }
 }

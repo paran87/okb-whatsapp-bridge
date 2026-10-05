@@ -63,6 +63,9 @@ interface MediaRepository {
     suspend fun resetFailedToPending(at: Long): Int
     suspend fun repairQueue(now: Long)
 
+    /** Removes the media rows and local files of messages deleted forever; returns rows removed. */
+    suspend fun deleteForMessages(messageIds: Collection<String>): Int
+
     /** Deletes local copies of media confirmed uploaded before [cutoff]; returns count removed. */
     suspend fun cleanupUploadedLocalFiles(cutoff: Long, at: Long): Int
     suspend fun largestQueuedBytes(): Long

@@ -43,6 +43,7 @@ class HealthCheckUseCase(
     private val alerts: HealthAlertSink,
     private val logger: BridgeLogger,
     private val media: MediaRepository? = null,
+    private val recycleBin: RecycleBinUseCase? = null,
     private val clock: () -> Long = System::currentTimeMillis,
     private val retentionMillis: Long = DEFAULT_RETENTION_MILLIS,
 ) {
@@ -84,6 +85,10 @@ class HealthCheckUseCase(
         }
 
         val backendResult = if (checkBackend && current.backendConfigured) backend.checkHealth() else null
+        recycleBin?.let { bin ->
+            val emptied = bin.purgeExpired()
+            if (emptied > 0) logger.info(TAG, "Recycle Bin: deleted $emptied message(s) older than 30 days")
+        }
         val removed = messages.deleteUploadedBefore(now - retentionMillis)
         if (removed > 0) logger.info(TAG, "Retention: removed $removed uploaded messages older than 30 days")
         // Local media cleanup: immediately after upload when the operator opted in, else after retention.

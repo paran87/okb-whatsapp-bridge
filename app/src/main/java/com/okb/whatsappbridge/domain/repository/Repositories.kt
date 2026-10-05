@@ -64,6 +64,19 @@ interface MessageRepository {
     suspend fun resetFailedToPending(): Int
     suspend fun repairQueue(now: Long)
     suspend fun deleteUploadedBefore(cutoff: Long): Int
+
+    // ---- Recycle Bin (local only: nothing is deleted on the backend) ----
+    /** Soft-deletes; returns how many messages moved. Deleted messages are hidden and not uploaded. */
+    suspend fun moveToRecycleBin(ids: Collection<String>, at: Long): Int
+    suspend fun restoreFromRecycleBin(ids: Collection<String>): Int
+    fun observeRecycleBin(limit: Int): Flow<List<BridgeMessage>>
+    fun observeRecycleBinCount(): Flow<Int>
+    /** Ids currently in the bin that were deleted before [cutoff] (use Long.MAX_VALUE for all). */
+    suspend fun recycleBinIdsDeletedBefore(cutoff: Long): List<String>
+    /** Deletes bin messages forever (content removed; a fingerprint-only tombstone remains briefly). */
+    suspend fun purgeFromRecycleBin(ids: Collection<String>, at: Long): Int
+    suspend fun deleteTombstonesBefore(cutoff: Long): Int
+
     /** Executes a trivial query; false when the database cannot be opened or queried. */
     suspend fun isDatabaseHealthy(): Boolean
 

@@ -88,7 +88,7 @@ abstract class MediaDao {
         SELECT m.*, q.attemptCount AS attemptCount, msg.fingerprint AS messageFingerprint
         FROM media m INNER JOIN media_upload_queue q ON q.mediaId = m.id
         LEFT JOIN messages msg ON msg.id = m.messageId
-        WHERE m.acquisitionStatus = 'AVAILABLE' AND m.id NOT IN (:excludedIds)
+        WHERE m.acquisitionStatus = 'AVAILABLE' AND m.id NOT IN (:excludedIds) AND msg.deletedAt IS NULL
           AND (
             m.uploadStatus IN ('PENDING', 'RETRYING', 'UPLOADING')
             OR (:includeFailed AND m.uploadStatus = 'FAILED' AND q.attemptCount < :maxFailedAttempts)
@@ -104,7 +104,8 @@ abstract class MediaDao {
     @Query(
         """
         SELECT COUNT(*) FROM media m INNER JOIN media_upload_queue q ON q.mediaId = m.id
-        WHERE m.acquisitionStatus = 'AVAILABLE' AND (
+        INNER JOIN messages msg ON msg.id = m.messageId
+        WHERE m.acquisitionStatus = 'AVAILABLE' AND msg.deletedAt IS NULL AND (
             m.uploadStatus IN ('PENDING', 'RETRYING', 'UPLOADING')
             OR (:includeFailed AND m.uploadStatus = 'FAILED' AND q.attemptCount < :maxFailedAttempts))
         """,
@@ -170,13 +171,27 @@ abstract class MediaDao {
     )
     abstract suspend fun repairQueue(now: Long)
 
+    // ---- Recycle Bin (delete forever) ----
+
+    @Query("SELECT localPath FROM media WHERE messageId IN (:messageIds) AND localPath IS NOT NULL")
+    abstract suspend fun localPathsForMessages(messageIds: List<String>): List<String>
+
+    /** Removes media rows (their upload-queue rows cascade). */
+    @Query("DELETE FROM media WHERE messageId IN (:messageIds)")
+    abstract suspend fun deleteForMessages(messageIds: List<String>): Int
+
     /** Content-based dedupe: an already-uploaded media row with the same bytes. */
     @Query("SELECT * FROM media WHERE sha256 = :sha256 AND uploadStatus = 'UPLOADED' AND r2ObjectKey IS NOT NULL LIMIT 1")
     abstract suspend fun findUploadedBySha256(sha256: String): MediaAttachmentEntity?
 
     // ---- Metrics / UI ----
 
-    @Query("SELECT uploadStatus AS status, COUNT(*) AS count FROM media WHERE acquisitionStatus = 'AVAILABLE' GROUP BY uploadStatus")
+    @Query(
+        """
+        SELECT m.uploadStatus AS status, COUNT(*) AS count FROM media m INNER JOIN messages msg ON msg.id = m.messageId
+        WHERE m.acquisitionStatus = 'AVAILABLE' AND msg.deletedAt IS NULL GROUP BY m.uploadStatus
+        """,
+    )
     abstract fun observeUploadStatusCounts(): Flow<List<StatusCount>>
 
     @Query("SELECT acquisitionStatus AS status, COUNT(*) AS count FROM media GROUP BY acquisitionStatus")

@@ -119,6 +119,14 @@ class FakeMessageRepository : MessageRepository {
     override suspend fun resetFailedToPending(): Int = 0
     override suspend fun repairQueue(now: Long) { repaired++ }
     override suspend fun deleteUploadedBefore(cutoff: Long): Int = 0
+    // Recycle Bin behaviour is tested against the real Room repository (RecycleBinTest).
+    override suspend fun moveToRecycleBin(ids: Collection<String>, at: Long): Int = 0
+    override suspend fun restoreFromRecycleBin(ids: Collection<String>): Int = 0
+    override fun observeRecycleBin(limit: Int): Flow<List<BridgeMessage>> = emptyFlow()
+    override fun observeRecycleBinCount(): Flow<Int> = emptyFlow()
+    override suspend fun recycleBinIdsDeletedBefore(cutoff: Long): List<String> = emptyList()
+    override suspend fun purgeFromRecycleBin(ids: Collection<String>, at: Long): Int = 0
+    override suspend fun deleteTombstonesBefore(cutoff: Long): Int = 0
     override suspend fun isDatabaseHealthy(): Boolean = true
 }
 

@@ -172,6 +172,11 @@ class StatusViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** Shows a one-off message in the app's snackbar. */
+    fun notify(message: String) {
+        _events.tryEmit(message)
+    }
+
     /** Operator pressed "Reconnect now". */
     fun reconnectListener() {
         viewModelScope.launch {

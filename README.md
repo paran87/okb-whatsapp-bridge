@@ -265,6 +265,21 @@ Nothing is simulated.
 
 *Rendered from sample state by `ScreenRenderTest` (Robolectric). The numbers shown are test data.*
 
+### Deleting messages (Recycle Bin)
+
+- **Delete:** in **Messages**, long-press a message to start selecting (tap more to add, **Select all**
+  for the whole list), then **Delete**. A single message can also be deleted from its detail screen.
+  The snackbar offers **Undo**.
+- **Recycle Bin:** the **Recycle Bin (N)** button in Messages. Select messages to **Restore** them or
+  **Delete forever**, or use **Empty Recycle Bin**. Messages are deleted for good automatically
+  **30 days** after they were moved to the bin.
+- **What it affects:** only this phone. While a message is in the bin it is hidden from lists and
+  counts and is **not uploaded**. Restoring it queues any pending upload again. Copies already
+  uploaded to the backend are **not** deleted there.
+- **Delete forever** removes the text, sender, group and any media file stored for it on the phone.
+  For 7 days only its fingerprint (a one-way hash, no content) is kept, so a notification WhatsApp or
+  Viber re-posts cannot bring the deleted message back.
+
 ## Troubleshooting
 
 **No notifications / "Last WhatsApp notification: Never"**
