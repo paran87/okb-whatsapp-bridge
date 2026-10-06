@@ -82,4 +82,41 @@ class OkHttpConsolidatedApiTest {
         assertEquals("""{"state":"notified","error":null}""", request.body.readUtf8())
         assertEquals("notified", (r as ApiResult.Success).value.whatsappStatus)
     }
+
+    @Test
+    fun `run-due parses TEXT jobs (sent automatically) and the next cut-off`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody(
+            """{"deliveries":[],"textDeliveries":[{"id":"9b2f6c1e-0000-4000-8000-000000000001","reportId":"r1","deliveryType":"TEXT","kind":"scheduled","status":"scheduled","destinationGroup":"OKB COMMAND CENTER","sourceGroup":"NMDEO FLOOD MONITORING","dedupeKey":"scheduled|2026-10-06T16:00:00.000Z|okb command center","parts":[{"text":"📋 OKB CONSOLIDATED\nRef: OKB-9B2F6C1E","ref":"OKB-9B2F6C1E"}],"attempts":0,"maxAttempts":10,"previousAttemptUncertain":false,"reportCount":3}],"nextCutoffAt":"2026-10-06T22:00:00.000Z","nextRetryAt":null}""",
+        ))
+        val response = (api.consolidatedRunDue(config(), ConsolidatedRunDueRequest()) as ApiResult.Success).value
+        val job = response.textDeliveries.single()
+        assertEquals("OKB COMMAND CENTER", job.destinationGroup)
+        assertEquals("OKB-9B2F6C1E", job.parts.single().ref)
+        assertEquals(3, job.reportCount)
+        assertEquals("2026-10-06T22:00:00.000Z", response.nextCutoffAt)
+    }
+
+    @Test
+    fun `TEXT claim and result use the device token, the delivery id and an idempotency key`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody(
+            """{"claimed":true,"reason":null,"delivery":{"id":"d1","reportId":"r1","destinationGroup":"OKB COMMAND CENTER","dedupeKey":"k","parts":[],"attempts":2}}""",
+        ))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"id":"r1"}"""))
+        val claim = (api.claimTextDelivery(config(), "d1") as ApiResult.Success).value
+        assertTrue(claim.claimed)
+        assertEquals(2, claim.delivery!!.attempts)
+        val claimRequest = server.takeRequest()
+        assertEquals("/api/v1/consolidated-reports/text-deliveries/d1/claim", claimRequest.path)
+        assertEquals("Bearer tok-123", claimRequest.getHeader("Authorization"))
+        assertEquals("OKB-ANDROID-A82F19", claimRequest.getHeader("X-OKB-Device-Id"))
+
+        val result = com.okb.whatsappbridge.data.remote.dto.TextResultRequest(state = "failed", attempt = 2, error = "x".repeat(500), retryable = true)
+        assertTrue(api.reportTextDeliveryResult(config(), "d1", result) is ApiResult.Success)
+        val resultRequest = server.takeRequest()
+        assertEquals("/api/v1/consolidated-reports/text-deliveries/d1/result", resultRequest.path)
+        assertEquals("d1-2-failed", resultRequest.getHeader("Idempotency-Key"))
+        val body = resultRequest.body.readUtf8()
+        assertTrue(body, body.contains("\"state\":\"failed\"") && body.contains("\"attempt\":2"))
+        assertFalse(body.contains("x".repeat(301))) // errors are capped
+    }
 }

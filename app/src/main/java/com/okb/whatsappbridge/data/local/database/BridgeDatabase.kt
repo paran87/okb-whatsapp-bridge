@@ -10,6 +10,7 @@ import com.okb.whatsappbridge.data.local.dao.GroupDao
 import com.okb.whatsappbridge.data.local.dao.MediaDao
 import com.okb.whatsappbridge.data.local.dao.MessageDao
 import com.okb.whatsappbridge.data.local.dao.SettingsDao
+import com.okb.whatsappbridge.data.local.dao.TextDeliveryDao
 import com.okb.whatsappbridge.data.local.dao.UploadQueueDao
 import com.okb.whatsappbridge.data.local.entity.BridgeEventLogEntity
 import com.okb.whatsappbridge.data.local.entity.BridgeSettingsEntity
@@ -17,6 +18,7 @@ import com.okb.whatsappbridge.data.local.entity.ConsolidatedDeliveryEntity
 import com.okb.whatsappbridge.data.local.entity.MediaAttachmentEntity
 import com.okb.whatsappbridge.data.local.entity.MediaUploadQueueEntity
 import com.okb.whatsappbridge.data.local.entity.MonitoredGroupEntity
+import com.okb.whatsappbridge.data.local.entity.TextDeliveryEntity
 import com.okb.whatsappbridge.data.local.entity.UploadQueueEntity
 import com.okb.whatsappbridge.data.local.entity.WhatsAppMessageEntity
 
@@ -37,8 +39,9 @@ import com.okb.whatsappbridge.data.local.entity.WhatsAppMessageEntity
         MediaAttachmentEntity::class,
         MediaUploadQueueEntity::class,
         ConsolidatedDeliveryEntity::class,
+        TextDeliveryEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class BridgeDatabase : RoomDatabase() {
@@ -49,6 +52,7 @@ abstract class BridgeDatabase : RoomDatabase() {
     abstract fun eventLogDao(): EventLogDao
     abstract fun mediaDao(): MediaDao
     abstract fun consolidatedDeliveryDao(): ConsolidatedDeliveryDao
+    abstract fun textDeliveryDao(): TextDeliveryDao
 
     companion object {
         const val NAME = "okb_bridge.db"

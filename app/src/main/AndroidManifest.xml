@@ -12,6 +12,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!-- Keeps the monitoring process alive while Background Monitoring is ON (see MonitoringForegroundService). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Automatic consolidated TEXT reports: wake the screen for the send, and an exact alarm at each cut-off
+         (the operator allows "Alarms & reminders" in Android settings; without it the alarm is inexact). -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <!-- Package visibility (Android 11+): needed to detect whether WhatsApp / Viber are installed. -->
     <queries>
@@ -73,7 +77,7 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps the operator-enabled notification listener running so authorized group messages are captured while the app is closed." />
         </service>
-        <!-- Opens WhatsApp's share screen for a consolidated report (from its notification); no UI of its own. -->
+        <!-- "Send as PDF": opens WhatsApp's share screen for a consolidated PDF (manual); no UI of its own. -->
         <activity
             android:name=".ui.consolidated.ShareReportActivity"
             android:excludeFromRecents="true"
@@ -81,6 +85,37 @@
             android:noHistory="true"
             android:taskAffinity=""
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!--
+            Automatic consolidated TEXT reports: drives WhatsApp (only) to send the report into the configured
+            destination group. Enabled by the operator in Android Settings → Accessibility.
+        -->
+        <service
+            android:name=".service.WhatsAppAutomationService"
+            android:exported="false"
+            android:label="@string/accessibility_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/whatsapp_automation_service" />
+        </service>
+
+        <!-- Turns the screen on and dismisses a non-secure lock screen before an automatic send; no UI. -->
+        <activity
+            android:name=".automation.UnlockActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- Exact alarm just after each scheduled cut-off: runs the consolidated-report check. -->
+        <receiver
+            android:name=".service.ReportAlarmReceiver"
+            android:exported="false" />
 
         <!-- Shares consolidated report PDFs (filesDir/consolidated) with WhatsApp, read-only, per share. -->
         <provider

@@ -36,7 +36,8 @@ closed, the screen is off, the phone is locked, or another app is in the foregro
 9. [Physical-device acceptance tests](#physical-device-acceptance-tests)
 10. [Architecture](#architecture)
 11. [Building and testing](#building-and-testing)
-12. [Known limitations](#known-limitations)
+12. [Consolidated WhatsApp reports: automatic TEXT, manual PDF](#consolidated-whatsapp-reports-automatic-text-manual-pdf)
+13. [Known limitations](#known-limitations)
 
 ---
 
@@ -424,8 +425,10 @@ Key design decisions:
   Backups and device-transfer are disabled, so neither captured messages nor credentials leave the
   phone except through the authenticated upload. Logs never contain tokens or message content.
   Release builds allow HTTPS only.
-- **Not used:** AccessibilityService, UI scraping, simulated taps, WhatsApp's private database, or
-  any attempt to bypass WhatsApp or Android security.
+- **Capture does not use** AccessibilityService, UI scraping, simulated taps, WhatsApp's private database,
+  or any attempt to bypass WhatsApp or Android security. The only UI automation in the app is the
+  operator-enabled accessibility service that *sends* the consolidated TEXT report into the destination
+  group ([Automatic TEXT report](#automatic-text-report-no-operator-action)); it never reads messages.
 
 ## Building and testing
 
@@ -484,8 +487,8 @@ and are never uploaded as such.
 Therefore the realistic outcome on most devices is a clean **media-unavailable** state. The bridge:
 
 - reads **only** a legitimately-provided `dataUri` through the public `ContentResolver`;
-- **never** reads WhatsApp's private storage, scrapes WhatsApp Web, automates the UI, uses an
-  `AccessibilityService`, or requires root;
+- **never** reads WhatsApp's private storage, scrapes WhatsApp Web, uses UI automation or an
+  `AccessibilityService` to obtain media, or requires root;
 - requests **no storage permission** (the primary strategy needs none);
 - when no legitimate file is available, records `acquisitionStatus = UNAVAILABLE` with an
   operator-readable reason, keeps the text/caption, and does not invent a workaround.
@@ -875,28 +878,114 @@ height, coordinates, report time) stay `null`, with `".010 m"` left un-normalize
    as reports (`?status=ignored` shows any that reached the backend).
 
 > Do not claim these passed until executed on the physical device.
-## Consolidated WhatsApp reports (one-tap send)
+## Consolidated WhatsApp reports: automatic TEXT, manual PDF
+
+Each scheduled consolidated report (6:00 AM, 6:00 PM, 12:00 AM Manila time, set in the Command Center) has
+**two independent deliveries** (`delivery_type` on the backend):
+
+| | TEXT report | PDF report |
+|---|---|---|
+| Delivery | **Automatic.** The bridge sends it into the destination group by itself | **Manual.** The operator taps **Send as PDF** and sends it from WhatsApp's share screen |
+| Operator action | None (works at 12:00 AM with the phone locked and nobody awake) | Tap, select the group, press Send, confirm in the app |
+| Status | Scheduled → Sending → **Sent** / Failed (retried automatically) | PDF Ready → Opened in WhatsApp → Sent (operator confirmed) / Failed |
+| Marked sent | Only when the message is seen in the destination chat | Only when the operator confirms |
+
+A period with **no reports** produces **no TEXT report**.
 
 ### WhatsApp Report Groups (Settings)
 
 Two separate settings with different purposes, stored separately (`source_group_name`,
 `destination_group_name` in the existing settings store) and sent to the backend with device registration
-and every 15-minute check:
+and every check:
 
 | Setting | Purpose |
 |---|---|
-| **Source Group** (e.g. *NMDEO FLOOD MONITORING*) | WhatsApp group where flood/activity reports are received. Only this group is captured. |
-| **Destination Group** (e.g. *OKB COMMAND CENTER*) | WhatsApp group where consolidated reports will be sent. **Never captured** as a report. |
+| **Source Group** (e.g. *NMDEO FLOOD MONITORING*) | WhatsApp group where flood/activity reports are received. Only this group is captured. **Never** a destination. |
+| **Destination Group** (e.g. *OKB COMMAND CENTER*) | Where the consolidated TEXT report is sent automatically (and the PDF manually). **Never captured** as a report. |
 
 - With no Source Group set, the groups authorized on the Groups tab are captured (previous behaviour).
 - The Destination Group is excluded from capture even if it is on the Groups allowlist.
-- The two names must be different (case and extra spaces are ignored).
+- The two names must be different (case and extra spaces are ignored). Give the destination group a name
+  no other chat on the phone has: the bridge refuses to send when two chats have the same name.
 
-### Delivery (backend → phone → WhatsApp)
+### Automatic TEXT report (no operator action)
 
-The backend generates the consolidated PDF. The existing 15-minute background check (`ReconciliationWorker`)
-asks `POST /api/v1/consolidated-reports/run-due`; the backend decides whether a report is due and lists the
-reports waiting for **this** phone. Each report is tracked locally (Room table `consolidated_report_deliveries`):
+```
+backend cut-off (e.g. 12:00 AM) ─▶ exact alarm on the phone at 12:01 AM ─▶ run-due: the backend builds the
+consolidated text from each report's AI summary and creates a TEXT job ─▶ claim (only one attempt at a time)
+─▶ wake screen, dismiss a non-secure lock screen ─▶ open WhatsApp ─▶ find the DESTINATION group (chat list,
+else WhatsApp search) ─▶ check the chat title is exactly that group ─▶ look for the report's reference in the
+chat (never send twice) ─▶ enter the text ─▶ press Send ─▶ confirm the message with that reference is in the
+chat and not "pending" ─▶ home screen, screen off again ─▶ result to the backend (kept and retried if offline)
+```
+
+- **How WhatsApp is driven.** Android has no API to send a WhatsApp message without the share screen
+  (`ACTION_SEND` always opens it, so it is used only for the PDF). The TEXT report is therefore sent by an
+  **AccessibilityService** (`service/WhatsAppAutomationService`) that the operator enables once. It is
+  limited to the WhatsApp packages, reads no events, and does nothing unless a TEXT job is being sent. The
+  send flow is `automation/WhatsAppTextSender` (pure Kotlin, unit-tested against a simulated WhatsApp);
+  the screen/lock handling is `automation/AndroidAutomaticTextSender` + `automation/UnlockActivity`.
+- **On time while asleep.** After every check the backend reports the next cut-off; the phone sets an exact
+  alarm (`setExactAndAllowWhileIdle`, works in Doze) one minute after it, which runs an expedited check
+  (`worker/ConsolidatedReportWorker`). The 15-minute periodic check stays as the safety net. If the backend
+  is unreachable at the cut-off (e.g. the free Render instance is waking up), the phone retries every 4
+  minutes, up to 6 times. Alarms are re-armed after a reboot or app update.
+- **Never twice.** (1) the backend creates one TEXT delivery per report and one per reporting period and
+  destination group (unique `dedupe_key`); (2) a delivery is claimed with a compare-and-set on its attempt
+  counter, so two checks cannot both send it, and it belongs to the phone that claimed it; (3) the phone
+  keeps its own queue (Room table `text_report_deliveries`, unique id and dedupe key) and never sends a
+  delivery it recorded as SENT; (4) every message carries a reference (`Ref: OKB-1A2B3C4D`) in its header,
+  and before typing the bridge searches the chat (including several screens of history) for it, so an
+  attempt interrupted after pressing Send is confirmed, not repeated. The message box itself (a draft) never
+  counts as sent. "Send pressed" is written to the database *before* pressing.
+- **Sent only when seen.** SENT requires the message with its reference to be visible in the destination
+  chat after Send and the message box to be empty. When WhatsApp's tick icon is readable, "Pending" (clock,
+  no connection) is **not** sent: the attempt fails and the next attempt confirms the same message once
+  WhatsApp has sent it. When the tick is not readable, the visible message is the confirmation (recorded
+  in the verification text).
+- **Retries.** A failed attempt is retried after 2, 5, 10, 15, 30, 30, 60 … minutes, up to 10 attempts, then
+  marked Failed; the Command Center can **Retry** a failed (never a sent) text report. A job not sent within
+  24 hours expires instead of being sent late. Problems that cannot fix themselves (destination equals
+  source group, two chats with the same name) fail at once.
+- **Dashboard.** **AUTOMATIC TEXT REPORT** card: status (Scheduled / Sending / Sent / Failed), destination,
+  period, sent time, verification and reference. **No Send button.** The **Automatic Text Reports** panel
+  shows what unattended sending needs, read from Android.
+
+#### Phone setup for unattended sending (required)
+
+1. **Accessibility:** Android Settings → Accessibility → *OKB Bridge automatic text reports* → On. On
+   Android 13+ a sideloaded app's accessibility switch is greyed out until you open Settings → Apps →
+   OKB WhatsApp Bridge → ⋮ → **Allow restricted settings**.
+2. **Alarms & reminders:** allow it for OKB WhatsApp Bridge (Android 12+; the Dashboard button opens it).
+   Without it the cut-off alarm is inexact and may run late in Doze.
+3. **Screen lock: None or Swipe.** Android never lets an app unlock a PIN, pattern or password. With a
+   secure lock and the phone locked, every attempt fails with that reason. (Smart Lock keeping the phone
+   unlocked also works while it is active.)
+4. **Battery:** OKB WhatsApp Bridge → Battery → Unrestricted (and Autostart on Xiaomi/Oppo/Vivo/Huawei).
+5. WhatsApp installed, logged in, and the account a **member of the destination group**; the phone charging
+   and online; WhatsApp in English for readable tick status (other languages still work, with the visible
+   message as the confirmation).
+
+#### Acceptance test (12:00 AM, phone locked, screen off)
+
+1. Do the setup above. In the Command Center: Settings → Automated WhatsApp reports → enabled, 12:00 AM
+   ticked, destination group saved. On the phone the Automatic Text Reports panel shows all green and
+   "Next check … 12:01 AM (exact)".
+2. Daytime dry run: press **Test Send** in the Command Center, then **Check now** on the phone. Within a
+   minute a `TEST REPORT` message appears in the destination group by itself; the history shows
+   *Automatic text: Sent*; the phone shows *PDF Ready* (not sent).
+3. Make sure at least one field report arrives in the source group before midnight. Lock the phone and
+   leave it (screen off, charging).
+4. After 12:01 AM: the destination group has the consolidated TEXT report once; Command Center history shows
+   *Automatic text: Sent → OKB COMMAND CENTER* with the time; the phone's screen is off again; the PDF waits
+   for **Send as PDF**.
+5. Negative checks: with a PIN set, the attempt fails with the screen-lock reason and nothing is sent; with
+   no reports in the period, no TEXT report is created.
+
+### Manual PDF report
+
+The backend generates the consolidated PDF. Each check lists the PDFs waiting for **this** phone, tracked
+locally (Room table `consolidated_report_deliveries`):
 
 ```
 READY_TO_SEND → DOWNLOADING → READY_FOR_WHATSAPP → OPENED_IN_WHATSAPP → SENT (operator confirms)
@@ -906,21 +995,33 @@ READY_TO_SEND → DOWNLOADING → READY_FOR_WHATSAPP → OPENED_IN_WHATSAPP → 
 - The PDF is downloaded into the app sandbox, checked to be a complete PDF (`%PDF-` … `%%EOF`) and shared
   only through the FileProvider. A report id is downloaded and offered once; acknowledgements made while
   offline are retried on the next check. Five failed downloads (or a 404) mark it FAILED.
-- The Dashboard shows **Consolidated Report Ready** (source, destination, file name, status) with **Send to
-  WhatsApp**, and a notification does the same. **Check now** asks the backend immediately.
+- The Dashboard shows **PDF Ready** (source, destination, file name) with **Send as PDF**, the only manual
+  action; a notification does the same. **Send as PDF** opens WhatsApp's share screen with the PDF and
+  caption; select the Destination Group and press Send, then answer **Yes, sent** or **Not sent** in the
+  app. The PDF is never marked SENT by itself.
 
-### Sending to the destination group (requires the operator)
+### What is verified and what is not
 
-Tapping **Send to WhatsApp** opens WhatsApp's **share screen** with the PDF attached and the short caption
-filled in (the caption is also copied to the clipboard). **Select the Destination Group and press Send.**
-Back in the app, answer **Yes, sent** or **Not sent**.
+Verified here (automated, see [End-to-end test](#end-to-end-test)):
+- Backend: TEXT + PDF created together, no TEXT for an empty period, single claim under concurrency,
+  retries/backoff/final failure/Retry, stale results ignored, lease expiry, 24-hour expiry, dedupe key, HTTP
+  auth; the SQL migration on Postgres (constraints, rollback, compare-and-set).
+- Phone: the full send flow against a **simulated** WhatsApp UI (right group only, refuses the source
+  group and wrong chats, finds an earlier copy instead of re-sending, pending vs sent, a Send press that
+  did not register, multi-part resume, duplicate chat names); the delivery queue (offline results,
+  write-ahead before Send, no second send after SENT, no concurrent sends); Room v4 → v5 migration; the
+  real backend + real HTTP client end to end; lint and the debug APK build.
 
-**Limitation.** Android's standard sharing (ACTION_SEND) cannot select a WhatsApp group or press Send, and
-WhatsApp does not tell other apps whether a message was sent. So the bridge never sends anything by itself,
-never marks a report SENT because WhatsApp opened, and records SENT only when the operator confirms it.
-No Accessibility automation or unofficial WhatsApp library is used. The share step is isolated in
-`WhatsAppShare.launch` (`ui/consolidated/ShareReportActivity.kt`), so a future automation would replace
-only that step, not the queue.
+**Not verified (needs the physical bridge phone):** the real WhatsApp app's screens (WhatsApp is not a
+public API; view ids `conversations_row_contact_name`, `conversation_contact_name`, `entry`, `send` and the
+tick descriptions are the ones WhatsApp has used for years, each with a fallback, but an update can change
+them — every step then fails with a clear reason and nothing is sent); turning the screen on and dismissing
+the lock screen on the specific phone model; exact-alarm and Doze timing on that phone. Run the acceptance
+test above before relying on the midnight report.
+
+**Risk:** automating WhatsApp is not an official WhatsApp feature, and WhatsApp's terms restrict automated
+use. It sends at most a few messages a day to one group, from a dedicated phone, but the account risk is
+the operator's decision.
 
 ### Logs
 
@@ -929,15 +1030,19 @@ keys are never logged (Redactor).
 
 ### End-to-end test
 
-`integration/ConsolidatedFlowE2ETest` drives the real Room database, capture pipeline, upload, delivery queue
-and HTTP client against a running backend (`okb-bridge-cloud-backend/scripts/e2e-local-server.js`). It is
-skipped unless `OKB_E2E_BACKEND_URL` is set:
+`integration/ConsolidatedFlowE2ETest` drives the real Room database, capture pipeline, upload, TEXT
+delivery (real `WhatsAppTextSender` against the simulated WhatsApp UI), PDF delivery queue and HTTP client
+against a running backend (`okb-bridge-cloud-backend/scripts/e2e-local-server.js`). It is skipped unless
+`OKB_E2E_BACKEND_URL` is set:
 
 ```
 OKB_E2E_BACKEND_URL=http://127.0.0.1:8091 ./gradlew testDebugUnitTest --tests '*ConsolidatedFlowE2ETest' --rerun
 ```
 
 ## Known limitations
+
+- The automatic TEXT report needs a phone screen lock of None or Swipe, the accessibility service enabled,
+  and WhatsApp's UI to stay recognisable; see [What is verified and what is not](#what-is-verified-and-what-is-not).
 
 - The bridge only sees what WhatsApp puts in its notifications. Messages in muted groups, in a chat
   that is open on screen, or that arrive while WhatsApp suppresses phone notifications (for example

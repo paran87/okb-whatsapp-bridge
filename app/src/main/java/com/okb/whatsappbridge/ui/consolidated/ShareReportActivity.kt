@@ -20,16 +20,13 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 /**
- * "Send to WhatsApp" (from the report notification or the Dashboard card). No UI of its own.
+ * "Send as PDF" (from the "PDF Ready" notification or Dashboard card): the MANUAL PDF delivery. No UI of its own.
  *
  * Opens WhatsApp's share screen with the consolidated PDF attached and the short caption filled in, and copies
- * the caption to the clipboard as a fallback. WhatsApp provides no supported way for another app to pre-select
- * a group chat, so the operator selects the configured DESTINATION group and presses Send. The bridge never
- * sends anything by itself and uses no accessibility or unofficial WhatsApp automation. Opening the share
- * screen is recorded as "opened in WhatsApp" only; the operator confirms "sent" in the app afterwards.
- *
- * Future automation (e.g. an AccessibilityService) would replace only [WhatsAppShare.launch]; the delivery
- * queue and its states stay the same.
+ * the caption to the clipboard as a fallback. The operator selects the configured DESTINATION group and presses
+ * Send. Opening the share screen is recorded as "opened in WhatsApp" only; the operator confirms "sent" in the
+ * app afterwards. The PDF is deliberately not automated; only the consolidated TEXT report is sent
+ * automatically (TextDeliveryUseCase / WhatsAppAutomationService), never through this share screen.
  */
 class ShareReportActivity : Activity() {
 

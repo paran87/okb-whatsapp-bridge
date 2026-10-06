@@ -19,8 +19,8 @@ import com.okb.whatsappbridge.whatsapp.ReportGroups
 
 /**
  * "WhatsApp Report Groups": two independent settings with different purposes. Reports are captured from the
- * SOURCE group; consolidated reports are shared to the DESTINATION group. The destination group is never used
- * to capture reports.
+ * SOURCE group; consolidated reports go to the DESTINATION group (TEXT automatically, PDF via the share screen).
+ * The destination group is never used to capture reports, and the source group is never a destination.
  */
 @Composable
 fun ReportGroupsPanel(
@@ -50,7 +50,7 @@ fun ReportGroupsPanel(
             label = { Text("Destination Group") },
             placeholder = { Text("OKB COMMAND CENTER") },
             leadingIcon = { Icon(Icons.AutoMirrored.Outlined.CallMissedOutgoing, contentDescription = "Outgoing") },
-            supportingText = { Text("WhatsApp group where consolidated reports will be sent.") },
+            supportingText = { Text("WhatsApp group the consolidated TEXT report is sent to automatically (and the PDF manually).") },
             isError = problem != null,
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),

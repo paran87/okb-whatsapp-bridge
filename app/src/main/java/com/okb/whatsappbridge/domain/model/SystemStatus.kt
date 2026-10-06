@@ -57,3 +57,19 @@ interface SystemStatusProvider {
      */
     fun resetListenerComponent(): Boolean = false
 }
+
+/** What unattended (screen off, operator asleep) automatic TEXT sending needs on this phone. */
+data class AutomationReadiness(
+    /** The operator enabled the OKB accessibility service in Android settings. */
+    val accessibilityEnabled: Boolean = false,
+    /** Android has the service running right now. */
+    val accessibilityConnected: Boolean = false,
+    /** "Alarms & reminders" allowed: the cut-off alarm is exact. */
+    val exactAlarmsAllowed: Boolean = false,
+    /** A PIN, pattern or password is set: Android never lets an app unlock it, so a locked phone cannot send. */
+    val secureLockScreen: Boolean = false,
+    val nextCheckAt: Long? = null,
+    val nextCheckExact: Boolean = false,
+) {
+    val ready: Boolean get() = accessibilityEnabled && accessibilityConnected && exactAlarmsAllowed && !secureLockScreen
+}

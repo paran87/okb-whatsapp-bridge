@@ -17,14 +17,17 @@ import com.okb.whatsappbridge.domain.usecase.ConsolidatedReportSink
 import com.okb.whatsappbridge.ui.consolidated.ShareReportActivity
 import java.io.File
 
-/** "Consolidated report ready" notification. Tapping it opens the one-tap WhatsApp share (ShareReportActivity). */
+/**
+ * "Consolidated PDF Ready" notification (manual PDF delivery). Tapping it opens WhatsApp's share screen
+ * (ShareReportActivity). The TEXT report needs no notification: it is sent automatically.
+ */
 class AndroidConsolidatedReportNotifier(private val context: Context) : ConsolidatedReportSink {
 
     override fun reportReady(delivery: ConsolidatedReportDelivery, pdf: File): Boolean {
         if (!canPost()) return false
         ensureChannel()
-        val title = if (delivery.isTest) "📄 TEST REPORT ready to send" else "📄 Consolidated Report Ready"
-        val text = "Tap “Send to WhatsApp”: " + shareInstruction(delivery.destinationGroup)
+        val title = if (delivery.isTest) "📄 TEST PDF ready" else "📄 Consolidated PDF Ready"
+        val text = "Tap to send as PDF: " + shareInstruction(delivery.destinationGroup)
         val period = delivery.caption.lineSequence()
             .dropWhile { !it.startsWith("Reporting Period") }.drop(1).takeWhile { it.isNotBlank() }.joinToString(" ")
         val intent = PendingIntent.getActivity(

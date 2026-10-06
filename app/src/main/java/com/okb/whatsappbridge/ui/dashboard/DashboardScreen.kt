@@ -23,9 +23,12 @@ import com.okb.whatsappbridge.ui.components.Panel
 import com.okb.whatsappbridge.ui.components.StatusLevel
 import com.okb.whatsappbridge.ui.components.StatusLine
 import com.okb.whatsappbridge.ui.components.WarningBanner
+import com.okb.whatsappbridge.ui.consolidated.AutomaticSendingPanel
+import com.okb.whatsappbridge.ui.consolidated.AutomaticTextReportCard
 import com.okb.whatsappbridge.ui.consolidated.ConsolidatedReportCard
 import com.okb.whatsappbridge.ui.consolidated.ReportGroupsStatusPanel
 import com.okb.whatsappbridge.ui.consolidated.needsAttention
+import com.okb.whatsappbridge.ui.consolidated.showOnDashboard
 import com.okb.whatsappbridge.ui.onboarding.SetupChecklist
 import com.okb.whatsappbridge.ui.onboarding.SetupStep
 import com.okb.whatsappbridge.util.system.SystemSettingsIntents
@@ -51,6 +54,7 @@ fun DashboardScreen(
     val system = state.system
     val counts = state.counts
 
+    val automation = state.polled.automation
     val steps = listOf(
         SetupStep("Grant Notification Access", system?.notificationAccessGranted == true, "Open") {
             SystemSettingsIntents.openNotificationAccess(context)
@@ -63,6 +67,17 @@ fun DashboardScreen(
         ),
         SetupStep("Configure the backend URL", settings.backendConfigured, "Settings", onOpenSettings),
         SetupStep("Turn on Background Monitoring", settings.monitoringEnabled, "Enable") { onToggleMonitoring(true) },
+    ) + if (!settings.destinationGroupConfigured) emptyList() else listOf(
+        // Consolidated reports in use: what unattended automatic TEXT sending needs.
+        SetupStep("Enable automatic text sending (Accessibility)", automation.accessibilityEnabled, "Open") {
+            SystemSettingsIntents.openAccessibilitySettings(context)
+        },
+        SetupStep("Allow exact alarms (Alarms & reminders)", automation.exactAlarmsAllowed, "Open") {
+            SystemSettingsIntents.openExactAlarmSettings(context)
+        },
+        SetupStep("Set screen lock to None or Swipe", !automation.secureLockScreen, "Open") {
+            SystemSettingsIntents.openScreenLockSettings(context)
+        },
     )
 
     LazyVerticalGrid(
@@ -73,7 +88,12 @@ fun DashboardScreen(
     ) {
         if (state.loaded) warnings(state, context, onReconnectListener)
 
-        // Consolidated reports waiting for the operator come first: they need a tap to reach WhatsApp.
+        // Automatic TEXT reports: status only, no action (sent to the destination group automatically).
+        state.textDeliveries.filter { it.showOnDashboard(now) }.take(3).forEach { delivery ->
+            item(key = "text-${delivery.id}", span = { GridItemSpan(maxLineSpan) }) { AutomaticTextReportCard(delivery) }
+        }
+
+        // Consolidated PDFs waiting for the operator: "Send as PDF" is the only manual action.
         state.deliveries.filter { it.needsAttention(now) }.forEach { delivery ->
             item(key = "delivery-${delivery.id}", span = { GridItemSpan(maxLineSpan) }) {
                 ConsolidatedReportCard(
@@ -135,6 +155,18 @@ fun DashboardScreen(
                 onOpenSettings = onOpenSettings,
                 busy = busy,
             )
+        }
+
+        if (settings.destinationGroupConfigured) {
+            item {
+                AutomaticSendingPanel(
+                    readiness = automation,
+                    destinationGroup = settings.destinationGroupName,
+                    onOpenAccessibility = { SystemSettingsIntents.openAccessibilitySettings(context) },
+                    onOpenAlarms = { SystemSettingsIntents.openExactAlarmSettings(context) },
+                    onOpenScreenLock = { SystemSettingsIntents.openScreenLockSettings(context) },
+                )
+            }
         }
 
         item {

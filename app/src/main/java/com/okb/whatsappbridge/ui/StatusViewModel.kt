@@ -3,6 +3,8 @@ package com.okb.whatsappbridge.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.okb.whatsappbridge.AppContainer
+import com.okb.whatsappbridge.automation.AutomationReadinessProbe
+import com.okb.whatsappbridge.domain.model.AutomationReadiness
 import com.okb.whatsappbridge.domain.model.BridgeSettings
 import com.okb.whatsappbridge.domain.model.ConsolidatedDeliveryCounts
 import com.okb.whatsappbridge.domain.model.ConsolidatedReportDelivery
@@ -10,6 +12,7 @@ import com.okb.whatsappbridge.domain.model.MonitoringState
 import com.okb.whatsappbridge.domain.model.MediaCounts
 import com.okb.whatsappbridge.domain.model.QueueCounts
 import com.okb.whatsappbridge.domain.model.SystemStatus
+import com.okb.whatsappbridge.domain.model.TextReportDelivery
 import com.okb.whatsappbridge.domain.usecase.ListenerRecoveryOutcome
 import com.okb.whatsappbridge.domain.usecase.SyncTrigger
 import com.okb.whatsappbridge.service.ListenerConnectionState
@@ -45,6 +48,7 @@ data class PolledState(
     val mediaLargestQueuedBytes: Long = 0,
     val mediaUsableSpaceBytes: Long? = null,
     val mediaAcquisitionSupported: Boolean = true,
+    val automation: AutomationReadiness = AutomationReadiness(),
 )
 
 data class StatusUiState(
@@ -64,6 +68,7 @@ data class StatusUiState(
     val mediaUploadWorker: SyncWorkerState = SyncWorkerState.IDLE,
     val deliveries: List<ConsolidatedReportDelivery> = emptyList(),
     val deliveryCounts: ConsolidatedDeliveryCounts = ConsolidatedDeliveryCounts(),
+    val textDeliveries: List<TextReportDelivery> = emptyList(),
     val loaded: Boolean = false,
 ) {
     val system: SystemStatus? get() = polled.system
@@ -131,7 +136,8 @@ class StatusViewModel(private val container: AppContainer) : ViewModel() {
     private val deliveryFlow = combine(
         container.consolidatedDeliveries.observeRecent(),
         container.consolidatedDeliveries.observeCounts(),
-    ) { list, counts -> list to counts }
+        container.textDeliveries.observeRecent(),
+    ) { list, counts, text -> Triple(list, counts, text) }
 
     val state: StateFlow<StatusUiState> = combine(base, derived, mediaFlow, deliveryFlow) { s, d, m, deliveries ->
         s.copy(
@@ -146,6 +152,7 @@ class StatusViewModel(private val container: AppContainer) : ViewModel() {
             mediaUploadWorker = m.worker,
             deliveries = deliveries.first,
             deliveryCounts = deliveries.second,
+            textDeliveries = deliveries.third,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StatusUiState())
 
@@ -170,6 +177,7 @@ class StatusViewModel(private val container: AppContainer) : ViewModel() {
                     mediaLargestQueuedBytes = runCatching { container.mediaRepository.largestQueuedBytes() }.getOrDefault(0),
                     mediaUsableSpaceBytes = runCatching { container.mediaRepository.usableSpaceBytes() }.getOrNull(),
                     mediaAcquisitionSupported = runCatching { container.mediaContentAccess.isMediaAcquisitionSupported() }.getOrDefault(true),
+                    automation = runCatching { AutomationReadinessProbe.read(container.appContext) }.getOrDefault(AutomationReadiness()),
                 )
             }
         }
@@ -319,17 +327,21 @@ class StatusViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    /** "Check now": asks the backend for consolidated reports waiting for this phone. */
+    /** "Check now": asks the backend for consolidated reports waiting for this phone (TEXT is sent right away). */
     fun checkReportsNow() = runBusy {
         val result = container.consolidatedReports()
         _events.emit(
             when {
                 result.error != null -> "Report check failed: ${result.error}"
+                result.textSent > 0 || result.textFailed > 0 ->
+                    "Text reports: ${result.textSent} sent, ${result.textFailed} not sent" +
+                        if (result.newlyReady > 0) " · ${result.newlyReady} PDF(s) ready" else ""
                 result.warning != null -> result.warning
-                result.newlyReady > 0 -> "${result.newlyReady} consolidated report(s) ready to send"
+                result.newlyReady > 0 -> "${result.newlyReady} consolidated PDF(s) ready to send"
                 else -> "No new consolidated reports"
             },
         )
+        refresh()
     }
 
     fun confirmReportSent(id: String) {

@@ -4,6 +4,7 @@ import android.app.Application
 import android.os.Build
 import java.io.File
 import androidx.work.WorkManager
+import com.okb.whatsappbridge.automation.AndroidAutomaticTextSender
 import com.okb.whatsappbridge.data.local.database.BridgeDatabase
 import com.okb.whatsappbridge.data.remote.api.OkHttpBridgeApi
 import com.okb.whatsappbridge.data.remote.api.OkHttpMediaUploader
@@ -13,6 +14,7 @@ import com.okb.whatsappbridge.data.repository.RoomLogRepository
 import com.okb.whatsappbridge.data.repository.RoomMediaRepository
 import com.okb.whatsappbridge.data.repository.RoomMessageRepository
 import com.okb.whatsappbridge.data.repository.RoomSettingsRepository
+import com.okb.whatsappbridge.data.repository.RoomTextDeliveryRepository
 import com.okb.whatsappbridge.data.repository.SecureDeviceIdentityRepository
 import com.okb.whatsappbridge.domain.usecase.AcquireMediaUseCase
 import com.okb.whatsappbridge.domain.usecase.BackendUseCases
@@ -24,6 +26,7 @@ import com.okb.whatsappbridge.domain.usecase.ProcessNotificationUseCase
 import com.okb.whatsappbridge.domain.usecase.RecycleBinUseCase
 import com.okb.whatsappbridge.domain.usecase.SyncMediaUseCase
 import com.okb.whatsappbridge.domain.usecase.SyncMessagesUseCase
+import com.okb.whatsappbridge.domain.usecase.TextDeliveryUseCase
 import com.okb.whatsappbridge.service.AndroidConsolidatedReportNotifier
 import com.okb.whatsappbridge.service.AndroidHealthAlertNotifier
 import com.okb.whatsappbridge.service.MonitoringForegroundService
@@ -34,6 +37,7 @@ import com.okb.whatsappbridge.util.logging.RoomBridgeLogger
 import com.okb.whatsappbridge.util.security.KeystoreSecretStore
 import com.okb.whatsappbridge.util.media.FileSystemMediaFileStore
 import com.okb.whatsappbridge.util.system.AndroidSystemStatusProvider
+import com.okb.whatsappbridge.worker.AlarmReportWakeScheduler
 import com.okb.whatsappbridge.worker.WorkManagerUploadScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,6 +49,8 @@ import kotlinx.coroutines.launch
  * workers and boot receiver without any Activity.
  */
 class AppContainer(private val app: Application) {
+
+    val appContext: android.content.Context get() = app
 
     /** Process-wide scope for short, bounded background tasks (never a keep-alive loop). */
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -98,10 +104,16 @@ class AppContainer(private val app: Application) {
     // Consolidated WhatsApp reports: PDFs downloaded for the one-tap share live in the app sandbox.
     val consolidatedReportDirectory: File by lazy { File(app.filesDir, "consolidated") }
     val consolidatedDeliveries by lazy { RoomConsolidatedDeliveryRepository(database.consolidatedDeliveryDao()) }
+    // Automatic consolidated TEXT reports: sent to the destination group through the accessibility service.
+    val textDeliveries by lazy { RoomTextDeliveryRepository(database.textDeliveryDao()) }
+    val automaticTextSender by lazy { AndroidAutomaticTextSender(app, logger) }
+    val textDelivery by lazy { TextDeliveryUseCase(api, textDeliveries, automaticTextSender, logger) }
+    val reportWakeScheduler by lazy { AlarmReportWakeScheduler(app, logger) }
     val consolidatedReports by lazy {
         ConsolidatedReportCheckUseCase(
             settingsRepository, identity, api, consolidatedDeliveries, consolidatedReportDirectory,
             AndroidConsolidatedReportNotifier(app), logger,
+            textDelivery = textDelivery, wakeScheduler = reportWakeScheduler,
         )
     }
     val healthCheck by lazy {

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import com.okb.whatsappbridge.OkbBridgeApplication
 import com.okb.whatsappbridge.domain.usecase.SyncTrigger
+import com.okb.whatsappbridge.worker.ConsolidatedReportWorker
 import kotlinx.coroutines.launch
 
 /**
@@ -34,6 +35,8 @@ class BootReceiver : BroadcastReceiver() {
                 val access = container.systemStatus.isNotificationAccessGranted()
                 // Boot and app-update broadcasts may start the monitoring service; also reconnect the listener.
                 container.ensureMonitoring(reason)
+                // Alarms do not survive a reboot: check now, which also sets the next cut-off alarm.
+                ConsolidatedReportWorker.runNow(container.workManager, reason)
                 container.logger.info("Boot", "Recovered after $reason; notification access granted=$access")
             } finally {
                 pending.finish()

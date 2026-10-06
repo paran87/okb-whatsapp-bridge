@@ -17,6 +17,8 @@ import com.okb.whatsappbridge.domain.repository.ConsolidatedDeliveryRepository
 import com.okb.whatsappbridge.domain.repository.DeviceIdentityRepository
 import com.okb.whatsappbridge.domain.repository.SettingsRepository
 import com.okb.whatsappbridge.util.logging.BridgeLogger
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 
 /** Shows the operator a "report ready" notification that opens the one-tap WhatsApp share. */
@@ -25,23 +27,42 @@ fun interface ConsolidatedReportSink {
     fun reportReady(delivery: ConsolidatedReportDelivery, pdf: File): Boolean
 }
 
-data class ConsolidatedCheckResult(val newlyReady: Int = 0, val warning: String? = null, val error: String? = null)
+data class ConsolidatedCheckResult(
+    val newlyReady: Int = 0,
+    val warning: String? = null,
+    val error: String? = null,
+    val textSent: Int = 0,
+    val textFailed: Int = 0,
+)
+
+/** Wakes the phone for the next consolidated-report check (exact alarm on Android; see AlarmReportWakeScheduler). */
+interface ReportWakeScheduler {
+    /** After a successful check: wake just after the next scheduled cut-off or TEXT retry (null = none known). */
+    fun scheduleNext(nextCutoffAtMillis: Long?, nextRetryAtMillis: Long?)
+
+    /** After a failed check: try again soon (bounded), so a report due now does not wait for the 15-minute check. */
+    fun scheduleRetry()
+}
 
 /** A verified local PDF ready to hand to WhatsApp's share screen. */
 data class ShareTarget(val delivery: ConsolidatedReportDelivery, val file: File)
 
 /**
- * Consolidated WhatsApp reports on the phone: the backend generates the PDF, this class brings it to the
- * phone and keeps a local delivery queue (Room) so nothing is downloaded or offered twice and nothing is lost
- * while offline.
+ * Consolidated WhatsApp reports on the phone. Each backend check returns two independent kinds of work:
+ *
+ *  - TEXT reports: sent AUTOMATICALLY to the destination group by [textDelivery] (no operator action). They are
+ *    handled first because they are time-critical (e.g. the 12:00 AM report while the operator sleeps).
+ *  - PDF reports: MANUAL. This class brings the PDF to the phone and keeps a local delivery queue (Room) so
+ *    nothing is downloaded or offered twice and nothing is lost while offline:
  *
  *   READY_TO_SEND → DOWNLOADING → READY_FOR_WHATSAPP → OPENED_IN_WHATSAPP → SENT (operator confirms)
  *                                        ↑__________ not sent __________|        FAILED (download failed)
  *
- * Runs from the existing 15-minute periodic check (WorkManager); the backend decides whether a report is due.
- * Nothing is sent to WhatsApp automatically: the operator opens WhatsApp's share screen, selects the
- * DESTINATION group and presses Send, then confirms in the app. Opening the share screen is never treated
- * as "sent".
+ *    The operator taps "Send as PDF", selects the DESTINATION group in WhatsApp's share screen and presses
+ *    Send, then confirms in the app. Opening the share screen is never treated as "sent".
+ *
+ * Runs from the 15-minute periodic check and from an exact alarm set just after each scheduled cut-off
+ * ([wakeScheduler]); the backend decides whether a report is due.
  */
 class ConsolidatedReportCheckUseCase(
     private val settings: SettingsRepository,
@@ -52,14 +73,20 @@ class ConsolidatedReportCheckUseCase(
     private val sink: ConsolidatedReportSink,
     private val logger: BridgeLogger,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val textDelivery: TextDeliveryUseCase? = null,
+    private val wakeScheduler: ReportWakeScheduler? = null,
 ) {
 
-    suspend operator fun invoke(): ConsolidatedCheckResult {
+    /** One check at a time: the cut-off alarm, the 15-minute worker and "Check now" may overlap. */
+    suspend operator fun invoke(): ConsolidatedCheckResult = CHECK_LOCK.withLock { check() }
+
+    private suspend fun check(): ConsolidatedCheckResult {
         val current = settings.current()
         if (!current.backendConfigured) return ConsolidatedCheckResult(error = "Backend URL not configured")
         val config = config(current.backendUrl)
 
         flushPendingAcks(config)
+        textDelivery?.flushPendingResults(config)
 
         val request = ConsolidatedRunDueRequest(
             sourceGroupName = current.sourceGroupName.ifBlank { null },
@@ -70,23 +97,35 @@ class ConsolidatedReportCheckUseCase(
             is ApiResult.HttpError -> {
                 // 404/503: an older backend, or consolidated storage not set up there yet.
                 if (r.httpCode != 404 && r.httpCode != 503) logger.warn(TAG, "Consolidated report check failed: ${r.message}")
+                if (r.httpCode >= 500) wakeScheduler?.scheduleRetry()
                 return ConsolidatedCheckResult(error = r.message)
             }
             is ApiResult.NetworkError -> {
                 logger.warn(TAG, "Consolidated report check failed (offline?): ${r.message}")
+                wakeScheduler?.scheduleRetry()
                 return ConsolidatedCheckResult(error = "Backend unreachable")
             }
             is ApiResult.ConfigurationError -> return ConsolidatedCheckResult(error = r.message)
         }
         response.warning?.let { logger.warn(TAG, "Backend: $it") }
 
+        // TEXT first: automatic and time-critical. PDFs wait for the operator anyway.
+        val text = if (textDelivery != null && response.textDeliveries.isNotEmpty()) {
+            textDelivery.process(config, response.textDeliveries, current.sourceGroupName)
+        } else {
+            TextDeliveryRunResult()
+        }
+
         var newlyReady = 0
         for (remote in response.deliveries) {
             if (process(config, remote)) newlyReady++
         }
         housekeeping()
-        return ConsolidatedCheckResult(newlyReady, response.warning)
+        wakeScheduler?.scheduleNext(epochMillis(response.nextCutoffAt), epochMillis(response.nextRetryAt))
+        return ConsolidatedCheckResult(newlyReady, response.warning, textSent = text.sent, textFailed = text.failed)
     }
+
+    private fun epochMillis(iso: String?): Long? = iso?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() }
 
     /** One pending delivery from the backend. Returns true when it became ready on this phone just now. */
     private suspend fun process(config: BackendConfig, remote: ConsolidatedDelivery): Boolean {
@@ -164,7 +203,7 @@ class ConsolidatedReportCheckUseCase(
     }
 
     /**
-     * Operator pressed "Send to WhatsApp": returns the verified local PDF, downloading it again first when it is
+     * Operator pressed "Send as PDF": returns the verified local PDF, downloading it again first when it is
      * missing (e.g. the app's storage was cleared). Null with an explanation when it cannot be prepared.
      */
     suspend fun prepareShare(id: String): Pair<ShareTarget?, String?> {
@@ -255,6 +294,7 @@ class ConsolidatedReportCheckUseCase(
     private fun config(baseUrl: String) = BackendConfig(baseUrl, identity.deviceId(), identity.deviceToken())
 
     companion object {
+        private val CHECK_LOCK = Mutex()
         private const val TAG = "Delivery"
         const val STATE_NOTIFIED = "notified"
         const val STATE_OPENED = "opened"

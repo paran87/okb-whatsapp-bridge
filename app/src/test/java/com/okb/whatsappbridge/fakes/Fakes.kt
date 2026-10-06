@@ -176,3 +176,23 @@ class FakeConsolidatedDeliveryRepository : com.okb.whatsappbridge.domain.reposit
     override suspend fun withPendingAck() = rows.values.filter { it.pendingAck != null }
     override suspend fun deleteFinishedBefore(before: Long) = 0
 }
+
+class FakeTextDeliveryRepository : com.okb.whatsappbridge.domain.repository.TextDeliveryRepository {
+    val rows = linkedMapOf<String, com.okb.whatsappbridge.domain.model.TextReportDelivery>()
+    private val flow = MutableStateFlow<List<com.okb.whatsappbridge.domain.model.TextReportDelivery>>(emptyList())
+    override suspend fun get(id: String) = rows[id]
+    override suspend fun getByDedupeKey(key: String) = rows.values.firstOrNull { it.dedupeKey == key }
+    override suspend fun insert(delivery: com.okb.whatsappbridge.domain.model.TextReportDelivery): Boolean {
+        if (rows.containsKey(delivery.id) || rows.values.any { it.dedupeKey == delivery.dedupeKey }) return false
+        rows[delivery.id] = delivery
+        flow.value = rows.values.toList()
+        return true
+    }
+    override suspend fun update(delivery: com.okb.whatsappbridge.domain.model.TextReportDelivery) {
+        rows[delivery.id] = delivery
+        flow.value = rows.values.toList()
+    }
+    override fun observeRecent(limit: Int) = flow
+    override suspend fun withPendingResult() = rows.values.filter { it.pendingResult != null }
+    override suspend fun deleteFinishedBefore(before: Long) = 0
+}

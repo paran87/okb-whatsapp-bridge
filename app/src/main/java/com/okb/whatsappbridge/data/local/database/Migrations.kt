@@ -93,5 +93,30 @@ object Migrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+    /**
+     * v4 → v5: local queue for automatic consolidated TEXT reports. Additive only: no existing table, column or
+     * row is touched.
+     */
+    val MIGRATION_4_5 = object : Migration(4, 5) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `text_report_deliveries` (`id` TEXT NOT NULL, `reportId` TEXT NOT NULL, " +
+                    "`kind` TEXT NOT NULL, `dedupeKey` TEXT NOT NULL, `destinationGroup` TEXT NOT NULL, `sourceGroup` TEXT, " +
+                    "`partsJson` TEXT NOT NULL, `periodStart` TEXT, `periodEnd` TEXT, `reportCount` INTEGER, " +
+                    "`status` TEXT NOT NULL, `attempt` INTEGER NOT NULL, `lastError` TEXT, `verification` TEXT, " +
+                    "`sentRefs` TEXT NOT NULL, `pressedRefs` TEXT NOT NULL, `pendingResult` TEXT, " +
+                    "`pendingRetryable` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, " +
+                    "`lastAttemptAt` INTEGER, `sentAt` INTEGER, PRIMARY KEY(`id`))",
+            )
+            db.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS `index_text_report_deliveries_dedupeKey` " +
+                    "ON `text_report_deliveries` (`dedupeKey`)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_text_report_deliveries_status` ON `text_report_deliveries` (`status`)",
+            )
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
 }

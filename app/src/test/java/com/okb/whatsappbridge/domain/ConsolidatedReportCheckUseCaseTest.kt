@@ -10,7 +10,19 @@ import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueResponse
 import com.okb.whatsappbridge.data.repository.SecureDeviceIdentityRepository
 import com.okb.whatsappbridge.domain.model.BridgeSettings
 import com.okb.whatsappbridge.domain.model.ConsolidatedDeliveryStatus
+import com.okb.whatsappbridge.automation.SendOutcome
+import com.okb.whatsappbridge.automation.SendProgress
+import com.okb.whatsappbridge.automation.TextSendRequest
+import com.okb.whatsappbridge.data.remote.dto.TextClaimResponse
+import com.okb.whatsappbridge.data.remote.dto.TextDeliveryJob
+import com.okb.whatsappbridge.data.remote.dto.TextMessagePart
+import com.okb.whatsappbridge.data.remote.dto.TextResultRequest
+import com.okb.whatsappbridge.data.remote.dto.TextResultResponse
+import com.okb.whatsappbridge.domain.usecase.AutomaticTextSender
 import com.okb.whatsappbridge.domain.usecase.ConsolidatedReportCheckUseCase
+import com.okb.whatsappbridge.domain.usecase.ReportWakeScheduler
+import com.okb.whatsappbridge.domain.usecase.TextDeliveryUseCase
+import com.okb.whatsappbridge.fakes.FakeTextDeliveryRepository
 import com.okb.whatsappbridge.fakes.FakeBridgeApi
 import com.okb.whatsappbridge.fakes.FakeConsolidatedDeliveryRepository
 import com.okb.whatsappbridge.fakes.FakeSettingsRepository
@@ -39,6 +51,10 @@ class ConsolidatedReportCheckUseCaseTest {
         var downloadBody: String = validPdf
         var downloadHttpError: Int? = null
         var ackOk = true
+        var textJobs: List<TextDeliveryJob> = emptyList()
+        var nextCutoffAt: String? = null
+        var nextRetryAt: String? = null
+        val order = mutableListOf<String>()
         val requests = mutableListOf<ConsolidatedRunDueRequest>()
         val downloads = mutableListOf<String>()
         val acks = mutableListOf<Pair<String, String>>()
@@ -46,17 +62,29 @@ class ConsolidatedReportCheckUseCaseTest {
         override suspend fun consolidatedRunDue(config: BackendConfig, request: ConsolidatedRunDueRequest): ApiResult<ConsolidatedRunDueResponse> {
             if (!online) return ApiResult.NetworkError("UnknownHostException")
             requests += request
-            return ApiResult.Success(ConsolidatedRunDueResponse(deliveries = deliveries), 200)
+            return ApiResult.Success(
+                ConsolidatedRunDueResponse(deliveries = deliveries, textDeliveries = textJobs, nextCutoffAt = nextCutoffAt, nextRetryAt = nextRetryAt),
+                200,
+            )
         }
 
         override suspend fun downloadConsolidatedPdf(config: BackendConfig, pdfPath: String, target: File): ApiResult<Long> {
             if (!online) return ApiResult.NetworkError("SocketTimeoutException")
             downloads += pdfPath
+            order += "pdf"
             downloadHttpError?.let { return ApiResult.HttpError(it, "HTTP $it") }
             target.parentFile?.mkdirs()
             target.writeText(downloadBody)
             return ApiResult.Success(target.length(), 200)
         }
+
+        override suspend fun claimTextDelivery(config: BackendConfig, id: String): ApiResult<TextClaimResponse> {
+            order += "text"
+            return ApiResult.Success(TextClaimResponse(claimed = true, delivery = textJobs.first { it.id == id }.copy(attempts = 1)), 200)
+        }
+
+        override suspend fun reportTextDeliveryResult(config: BackendConfig, id: String, result: TextResultRequest): ApiResult<TextResultResponse> =
+            ApiResult.Success(TextResultResponse(id), 200)
 
         override suspend fun acknowledgeConsolidatedDelivery(config: BackendConfig, id: String, state: String, error: String?): ApiResult<ConsolidatedDeliveryAckResponse> {
             if (!online || !ackOk) return ApiResult.NetworkError("offline")
@@ -81,10 +109,56 @@ class ConsolidatedReportCheckUseCaseTest {
         BridgeSettings(backendUrl = "https://okb.test", sourceGroupName = "NMDEO FLOOD MONITORING", destinationGroupName = "OKB COMMAND CENTER"),
     )
 
+    private val wakes = mutableListOf<String>()
+    private val wakeScheduler = object : ReportWakeScheduler {
+        override fun scheduleNext(nextCutoffAtMillis: Long?, nextRetryAtMillis: Long?) { wakes += "next $nextCutoffAtMillis $nextRetryAtMillis" }
+        override fun scheduleRetry() { wakes += "retry" }
+    }
+    private val textSender = object : AutomaticTextSender {
+        val sent = mutableListOf<String>()
+        override fun unavailableReason(): String? = null
+        override suspend fun send(request: TextSendRequest, progress: SendProgress): SendOutcome {
+            sent += request.destinationGroup
+            return SendOutcome.Sent("visible")
+        }
+    }
+
     private fun useCase(api: BridgeApi, canNotify: Boolean = true) = ConsolidatedReportCheckUseCase(
         settings, SecureDeviceIdentityRepository(InMemorySecretStore()), api, repo, tmp.root,
         { d, _ -> if (canNotify) notified += d.id; canNotify }, RecordingLogger(),
+        textDelivery = TextDeliveryUseCase(api, FakeTextDeliveryRepository(), textSender, RecordingLogger()),
+        wakeScheduler = wakeScheduler,
     )
+
+    private val textJob = TextDeliveryJob(
+        id = "9b2f6c1e-0000-4000-8000-000000000001", reportId = "5f0c6a2e-1b7d-4c1e-9a77-1d2f3e4a5b6c",
+        destinationGroup = "OKB COMMAND CENTER", dedupeKey = "scheduled|2026-10-06T16:00:00.000Z|okb command center",
+        parts = listOf(TextMessagePart("📋 OKB CONSOLIDATED FLOOD MONITORING REPORT\nRef: OKB-9B2F6C1E", "OKB-9B2F6C1E")),
+    )
+
+    @Test
+    fun `the TEXT report is sent automatically before the PDF is downloaded, and the next cut-off alarm is set`() = runTest {
+        val api = Api(listOf(remote)).apply {
+            textJobs = listOf(textJob)
+            nextCutoffAt = "2026-10-06T22:00:00Z"
+        }
+        val result = useCase(api)()
+        assertEquals(1, result.textSent)
+        assertEquals(1, result.newlyReady)
+        assertEquals(listOf("text", "pdf"), api.order)
+        assertEquals(listOf("OKB COMMAND CENTER"), textSender.sent)
+        // The PDF is still manual: offered to the operator, not sent.
+        assertEquals(ConsolidatedDeliveryStatus.READY_FOR_WHATSAPP, status())
+        assertEquals(listOf("next ${java.time.Instant.parse("2026-10-06T22:00:00Z").toEpochMilli()} null"), wakes)
+    }
+
+    @Test
+    fun `backend unreachable at the cut-off - a quick retry is scheduled`() = runTest {
+        val api = Api(listOf(remote)).apply { online = false }
+        val result = useCase(api)()
+        assertEquals("Backend unreachable", result.error)
+        assertEquals(listOf("retry"), wakes)
+    }
 
     private suspend fun status() = repo.get(remote.id)?.status
 

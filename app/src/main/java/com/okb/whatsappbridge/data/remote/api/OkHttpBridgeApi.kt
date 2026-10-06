@@ -13,6 +13,9 @@ import com.okb.whatsappbridge.data.remote.dto.ConsolidatedDeliveryAck
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedDeliveryAckResponse
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueRequest
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueResponse
+import com.okb.whatsappbridge.data.remote.dto.TextClaimResponse
+import com.okb.whatsappbridge.data.remote.dto.TextResultRequest
+import com.okb.whatsappbridge.data.remote.dto.TextResultResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
@@ -106,6 +109,27 @@ class OkHttpBridgeApi(
         body = json.encodeToString(ConsolidatedDeliveryAck.serializer(), ConsolidatedDeliveryAck(state, error?.take(300))),
         ConsolidatedDeliveryAckResponse.serializer(),
         ConsolidatedDeliveryAckResponse(),
+    )
+
+    override suspend fun claimTextDelivery(config: BackendConfig, id: String): ApiResult<TextClaimResponse> = execute(
+        config,
+        "api/v1/consolidated-reports/text-deliveries/$id/claim",
+        body = "{}",
+        TextClaimResponse.serializer(),
+        TextClaimResponse(),
+    )
+
+    override suspend fun reportTextDeliveryResult(
+        config: BackendConfig,
+        id: String,
+        result: TextResultRequest,
+    ): ApiResult<TextResultResponse> = execute(
+        config,
+        "api/v1/consolidated-reports/text-deliveries/$id/result",
+        body = json.encodeToString(TextResultRequest.serializer(), result.copy(error = result.error?.take(300))),
+        TextResultResponse.serializer(),
+        TextResultResponse(),
+        idempotencyKey = "$id-${result.attempt}-${result.state}",
     )
 
     override suspend fun downloadConsolidatedPdf(config: BackendConfig, pdfPath: String, target: File): ApiResult<Long> {

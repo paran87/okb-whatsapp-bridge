@@ -153,3 +153,46 @@ data class ConsolidatedReportDelivery(
 
 /** Dashboard counts: pending = not yet on the phone; ready = waiting for the operator (incl. opened). */
 data class ConsolidatedDeliveryCounts(val pending: Int = 0, val ready: Int = 0, val sent: Int = 0, val failed: Int = 0)
+
+/**
+ * Automatic consolidated TEXT report on this phone (no operator action):
+ * SCHEDULED (waiting / retrying) → SENDING (WhatsApp is being driven) → SENT (in the destination chat) | FAILED.
+ */
+enum class TextDeliveryStatus {
+    SCHEDULED,
+    SENDING,
+    SENT,
+    FAILED,
+    ;
+
+    companion object {
+        fun of(name: String?): TextDeliveryStatus = entries.firstOrNull { it.name == name } ?: SCHEDULED
+    }
+}
+
+data class TextReportDelivery(
+    val id: String,
+    val reportId: String,
+    val kind: String,
+    val dedupeKey: String,
+    val destinationGroup: String,
+    val sourceGroup: String?,
+    val parts: List<com.okb.whatsappbridge.automation.MessagePart>,
+    val periodStart: String?,
+    val periodEnd: String?,
+    val reportCount: Int?,
+    val status: TextDeliveryStatus,
+    val attempt: Int = 0,
+    val lastError: String? = null,
+    val verification: String? = null,
+    val sentRefs: Set<String> = emptySet(),
+    val pressedRefs: Set<String> = emptySet(),
+    val pendingResult: String? = null,
+    val pendingRetryable: Boolean = true,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val lastAttemptAt: Long? = null,
+    val sentAt: Long? = null,
+) {
+    val isTest: Boolean get() = kind == "test"
+}

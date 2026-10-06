@@ -9,10 +9,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.okb.whatsappbridge.domain.model.AutomationReadiness
 import com.okb.whatsappbridge.domain.model.BridgeSettings
 import com.okb.whatsappbridge.domain.model.ConsolidatedDeliveryCounts
 import com.okb.whatsappbridge.domain.model.ConsolidatedDeliveryStatus
@@ -79,22 +82,24 @@ class ReportGroupsRenderTest {
 
     private fun state(vararg deliveries: ConsolidatedReportDelivery) = StatusUiState(
         settings = settings,
+        // Automatic sending set up, so the setup checklist is not shown.
+        polled = PolledState(automation = AutomationReadiness(accessibilityEnabled = true, accessibilityConnected = true, exactAlarmsAllowed = true)),
         deliveries = deliveries.toList(),
         deliveryCounts = ConsolidatedDeliveryCounts(pending = 0, ready = deliveries.size, sent = 4, failed = 0),
         loaded = true,
     )
 
     @Test
-    fun `TEST 7 - the ready card names the destination group and offers Send to WhatsApp`() {
+    fun `TEST 7 - the PDF card names the destination group and offers Send as PDF (the only manual action)`() {
         var sent: String? = null
         render("report-ready-card") {
             DashboardScreen(state(delivery(ConsolidatedDeliveryStatus.READY_FOR_WHATSAPP)), now, {}, {}, {}, {}, {}, onSendReport = { sent = it })
         }
-        compose.onNodeWithText("CONSOLIDATED REPORT READY").assertExists()
-        compose.onNodeWithText("READY TO SEND", useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("PDF READY").assertExists()
+        compose.onNodeWithText("WAITING FOR OPERATOR", useUnmergedTree = true).assertExists()
         compose.onNodeWithText("WhatsApp share screen will open. Select “OKB COMMAND CENTER” and press Send.").assertExists()
         compose.onNodeWithText("OKB_Consolidated_Flood_Report_2026-10-06_1800.pdf").assertExists()
-        compose.onNodeWithText("Send to WhatsApp").performClick()
+        compose.onNodeWithText("Send as PDF").performClick()
         assertEquals("5f0c6a2e-1b7d-4c1e-9a77-1d2f3e4a5b6c", sent)
     }
 
@@ -120,7 +125,7 @@ class ReportGroupsRenderTest {
         render("report-groups-status") { DashboardScreen(state(), now, {}, {}, {}, {}, {}) }
         compose.onNodeWithText("REPORT GROUPS & DELIVERY").assertExists()
         compose.onNodeWithText("NMDEO FLOOD MONITORING").assertExists()
-        compose.onNodeWithText("OKB COMMAND CENTER").assertExists()
+        compose.onAllNodesWithText("OKB COMMAND CENTER").onFirst().assertExists()
         compose.onNodeWithText("Pending 0 · Ready 0 · Sent 4 · Failed 0").assertExists()
     }
 
@@ -132,7 +137,7 @@ class ReportGroupsRenderTest {
         compose.onNodeWithText("Source Group").assertExists()
         compose.onNodeWithText("Destination Group").assertExists()
         compose.onNodeWithText("WhatsApp group where flood/activity reports are received.").assertExists()
-        compose.onNodeWithText("WhatsApp group where consolidated reports will be sent.").assertExists()
+        compose.onNodeWithText("WhatsApp group the consolidated TEXT report is sent to automatically (and the PDF manually).").assertExists()
         compose.onNodeWithText("The source and destination groups must be different groups.").assertExists()
         compose.onNodeWithText("Save groups").assertIsNotEnabled()
     }

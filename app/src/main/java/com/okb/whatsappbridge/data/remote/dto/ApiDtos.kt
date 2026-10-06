@@ -76,7 +76,10 @@ data class ConsolidatedRunDueRequest(
     val destinationGroupName: String? = null,
 )
 
-/** `POST /api/v1/consolidated-reports/run-due`: deliveries the phone should offer to the operator. */
+/**
+ * `POST /api/v1/consolidated-reports/run-due`: the phone's work. [textDeliveries] are sent automatically;
+ * [deliveries] are PDFs offered to the operator. Older backends send neither the TEXT jobs nor the times.
+ */
 @Serializable
 data class ConsolidatedRunDueResponse(
     val checkedAt: String? = null,
@@ -84,7 +87,61 @@ data class ConsolidatedRunDueResponse(
     /** Configuration problem the backend reports, e.g. no destination group configured. */
     val warning: String? = null,
     val deliveries: List<ConsolidatedDelivery> = emptyList(),
+    val textDeliveries: List<TextDeliveryJob> = emptyList(),
+    /** Next scheduled cut-off (ISO-8601): the phone sets an exact alarm just after it. */
+    val nextCutoffAt: String? = null,
+    /** Earliest retry of a failed automatic TEXT attempt (ISO-8601). */
+    val nextRetryAt: String? = null,
 )
+
+/** One part of a consolidated TEXT report: the WhatsApp message and the reference printed in it. */
+@Serializable
+data class TextMessagePart(val text: String, val ref: String)
+
+/** A consolidated TEXT report the phone sends automatically to [destinationGroup]. */
+@Serializable
+data class TextDeliveryJob(
+    val id: String,
+    val reportId: String,
+    val kind: String? = null,
+    val status: String? = null,
+    val destinationGroup: String,
+    val sourceGroup: String? = null,
+    /** One automatic send per reporting period and group; also unique on the phone. */
+    val dedupeKey: String,
+    val parts: List<TextMessagePart> = emptyList(),
+    val attempts: Int = 0,
+    val maxAttempts: Int? = null,
+    /** An earlier attempt was claimed but never reported: the chat is checked before anything is sent. */
+    val previousAttemptUncertain: Boolean = false,
+    val periodStart: String? = null,
+    val periodEnd: String? = null,
+    val reportCount: Int? = null,
+) {
+    val isTest: Boolean get() = kind == "test"
+}
+
+/** `POST …/text-deliveries/{id}/claim`. [reason] when not claimed: already_sent | failed | not_due | in_progress. */
+@Serializable
+data class TextClaimResponse(
+    val claimed: Boolean = false,
+    val reason: String? = null,
+    val delivery: TextDeliveryJob? = null,
+)
+
+/** `POST …/text-deliveries/{id}/result`: sent | failed for attempt [attempt]. */
+@Serializable
+data class TextResultRequest(
+    val state: String,
+    val attempt: Int,
+    val error: String? = null,
+    val retryable: Boolean = true,
+    val verification: String? = null,
+    val sentAt: String? = null,
+)
+
+@Serializable
+data class TextResultResponse(val id: String? = null)
 
 /** One generated consolidated report PDF waiting to be handed to WhatsApp. */
 @Serializable

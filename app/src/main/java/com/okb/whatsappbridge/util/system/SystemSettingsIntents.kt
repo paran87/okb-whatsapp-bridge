@@ -37,6 +37,25 @@ object SystemSettingsIntents {
         listOf(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS), appDetails(context.packageName)),
     )
 
+    /** Settings → Accessibility, where the operator enables "OKB Bridge automatic text reports". */
+    fun openAccessibilitySettings(context: Context): Boolean =
+        startFirst(context, listOf(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS), Intent(Settings.ACTION_SETTINGS)))
+
+    /** "Alarms & reminders" for this app (Android 12+), so the cut-off alarm is exact. */
+    fun openExactAlarmSettings(context: Context): Boolean {
+        val candidates = buildList {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                add(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.fromParts("package", context.packageName, null)))
+            }
+            add(appDetails(context.packageName))
+        }
+        return startFirst(context, candidates)
+    }
+
+    /** Settings → Security / Screen lock, to set None or Swipe on the dedicated bridge phone. */
+    fun openScreenLockSettings(context: Context): Boolean =
+        startFirst(context, listOf(Intent(Settings.ACTION_SECURITY_SETTINGS), Intent(Settings.ACTION_SETTINGS)))
+
     fun openAppDetails(context: Context, packageName: String = context.packageName): Boolean =
         startFirst(context, listOf(appDetails(packageName)))
 

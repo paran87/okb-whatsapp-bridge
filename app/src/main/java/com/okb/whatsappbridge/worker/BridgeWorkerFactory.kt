@@ -24,6 +24,8 @@ class BridgeWorkerFactory(
             MessageUploadWorker::class.java.name -> MessageUploadWorker(appContext, workerParameters, sync(), logger())
             MediaUploadWorker::class.java.name -> MediaUploadWorker(appContext, workerParameters, mediaSync(), logger())
             ReconciliationWorker::class.java.name -> ReconciliationWorker(appContext, workerParameters, healthCheck(), logger(), consolidatedCheck())
+            ConsolidatedReportWorker::class.java.name ->
+                consolidatedCheck()?.let { ConsolidatedReportWorker(appContext, workerParameters, it, logger()) }
             else -> null
         }
 }

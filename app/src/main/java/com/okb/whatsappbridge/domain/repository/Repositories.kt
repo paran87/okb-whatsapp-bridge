@@ -9,6 +9,7 @@ import com.okb.whatsappbridge.domain.model.MediaStatus
 import com.okb.whatsappbridge.domain.model.MediaType
 import com.okb.whatsappbridge.domain.model.MonitoredGroup
 import com.okb.whatsappbridge.domain.model.QueueCounts
+import com.okb.whatsappbridge.domain.model.TextReportDelivery
 import com.okb.whatsappbridge.domain.model.UploadStatus
 import com.okb.whatsappbridge.domain.usecase.SyncTrigger
 import kotlinx.coroutines.flow.Flow
@@ -158,5 +159,17 @@ interface ConsolidatedDeliveryRepository {
     fun observeRecent(limit: Int = 20): Flow<List<ConsolidatedReportDelivery>>
     fun observeCounts(): Flow<ConsolidatedDeliveryCounts>
     suspend fun withPendingAck(): List<ConsolidatedReportDelivery>
+    suspend fun deleteFinishedBefore(before: Long): Int
+}
+
+/** Local queue of automatic consolidated TEXT reports. */
+interface TextDeliveryRepository {
+    suspend fun get(id: String): TextReportDelivery?
+    suspend fun getByDedupeKey(key: String): TextReportDelivery?
+    /** False when the dedupe key is already used by another delivery (nothing is stored). */
+    suspend fun insert(delivery: TextReportDelivery): Boolean
+    suspend fun update(delivery: TextReportDelivery)
+    fun observeRecent(limit: Int = 10): Flow<List<TextReportDelivery>>
+    suspend fun withPendingResult(): List<TextReportDelivery>
     suspend fun deleteFinishedBefore(before: Long): Int
 }

@@ -31,7 +31,7 @@ fun ConsolidatedReportDelivery.needsAttention(now: Long): Boolean = when (status
 fun ConsolidatedDeliveryStatus.label(): Pair<StatusLevel, String> = when (this) {
     ConsolidatedDeliveryStatus.READY_TO_SEND -> StatusLevel.WARNING to "Waiting to download"
     ConsolidatedDeliveryStatus.DOWNLOADING -> StatusLevel.INFO to "Downloading"
-    ConsolidatedDeliveryStatus.READY_FOR_WHATSAPP -> StatusLevel.OK to "Ready to Send"
+    ConsolidatedDeliveryStatus.READY_FOR_WHATSAPP -> StatusLevel.OK to "Waiting for operator"
     ConsolidatedDeliveryStatus.OPENED_IN_WHATSAPP -> StatusLevel.INFO to "Opened in WhatsApp"
     ConsolidatedDeliveryStatus.SENT -> StatusLevel.OK to "Sent (confirmed)"
     ConsolidatedDeliveryStatus.FAILED -> StatusLevel.ERROR to "Failed"
@@ -65,7 +65,7 @@ fun ReportGroupsStatusPanel(
         )
         StatusLine("Backend", backend.level, backend.label)
         KeyValueLine(
-            "Reports",
+            "PDFs (manual)",
             "Pending ${counts.pending} · Ready ${counts.ready} · Sent ${counts.sent} · Failed ${counts.failed}",
         )
         ButtonRow {
@@ -75,7 +75,10 @@ fun ReportGroupsStatusPanel(
     }
 }
 
-/** "Consolidated Report Ready" card with the one-tap "Send to WhatsApp" flow and the operator's confirmation. */
+/**
+ * Consolidated PDF (MANUAL): "PDF Ready" with "Send as PDF", the only manual action. WhatsApp's share screen
+ * opens; the operator selects the destination group, presses Send and confirms here. Never marked sent by itself.
+ */
 @Composable
 fun ConsolidatedReportCard(
     delivery: ConsolidatedReportDelivery,
@@ -89,9 +92,9 @@ fun ConsolidatedReportCard(
     val source = delivery.sourceGroup?.takeIf { it.isNotBlank() } ?: settings.sourceGroupName.ifBlank { null }
     val (level, label) = delivery.status.label()
     val title = when {
-        delivery.isTest -> "TEST REPORT ready"
-        delivery.status == ConsolidatedDeliveryStatus.FAILED -> "Consolidated Report"
-        else -> "Consolidated Report Ready"
+        delivery.status == ConsolidatedDeliveryStatus.FAILED -> if (delivery.isTest) "CONSOLIDATED PDF · TEST" else "CONSOLIDATED PDF"
+        delivery.isTest -> "PDF Ready · TEST"
+        else -> "PDF Ready"
     }
     Panel(title = title, accent = level.color()) {
         KeyValueLine("Source", source ?: "—", mono = false)
@@ -102,7 +105,7 @@ fun ConsolidatedReportCard(
         StatusLine("Status", level, label, delivery.errorMessage)
         when (delivery.status) {
             ConsolidatedDeliveryStatus.READY_FOR_WHATSAPP -> {
-                Button(onClick = onSend, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Send to WhatsApp") }
+                Button(onClick = onSend, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Send as PDF") }
                 Hint(
                     if (destination != null) "WhatsApp share screen will open. Select “$destination” and press Send."
                     else "WhatsApp share screen will open. No destination group is set — select the correct group and press Send.",

@@ -12,6 +12,9 @@ import com.okb.whatsappbridge.data.remote.dto.MediaCompleteResponse
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedDeliveryAckResponse
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueRequest
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueResponse
+import com.okb.whatsappbridge.data.remote.dto.TextClaimResponse
+import com.okb.whatsappbridge.data.remote.dto.TextResultRequest
+import com.okb.whatsappbridge.data.remote.dto.TextResultResponse
 import java.io.File
 
 /** Credentials and endpoint used for a call. The token is never logged. */
@@ -30,7 +33,9 @@ data class BackendConfig(
  *  - `POST /api/v1/media/complete`  (Phase 2)
  *  - `POST /api/v1/consolidated-reports/run-due`        (consolidated reports: 15-minute check)
  *  - `GET  /api/v1/consolidated-reports/{id}/pdf`       (consolidated reports: the PDF)
- *  - `POST /api/v1/consolidated-reports/{id}/delivery`  (consolidated reports: notified / opened / sent / not_sent / failed)
+ *  - `POST /api/v1/consolidated-reports/{id}/delivery`  (consolidated reports, PDF: notified / opened / sent / not_sent / failed)
+ *  - `POST /api/v1/consolidated-reports/text-deliveries/{id}/claim`   (TEXT: start one automatic attempt)
+ *  - `POST /api/v1/consolidated-reports/text-deliveries/{id}/result`  (TEXT: sent / failed)
  */
 interface BridgeApi {
     suspend fun health(config: BackendConfig): ApiResult<HealthResponse>
@@ -57,4 +62,10 @@ interface BridgeApi {
         error: String? = null,
     ): ApiResult<ConsolidatedDeliveryAckResponse> =
         ApiResult.ConfigurationError("Consolidated reports are not supported")
+
+    suspend fun claimTextDelivery(config: BackendConfig, id: String): ApiResult<TextClaimResponse> =
+        ApiResult.ConfigurationError("Automatic text reports are not supported")
+
+    suspend fun reportTextDeliveryResult(config: BackendConfig, id: String, result: TextResultRequest): ApiResult<TextResultResponse> =
+        ApiResult.ConfigurationError("Automatic text reports are not supported")
 }
