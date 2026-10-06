@@ -15,6 +15,7 @@ import com.okb.whatsappbridge.data.repository.RoomSettingsRepository
 import com.okb.whatsappbridge.data.repository.SecureDeviceIdentityRepository
 import com.okb.whatsappbridge.domain.usecase.AcquireMediaUseCase
 import com.okb.whatsappbridge.domain.usecase.BackendUseCases
+import com.okb.whatsappbridge.domain.usecase.ConsolidatedReportCheckUseCase
 import com.okb.whatsappbridge.domain.usecase.DeviceInfo
 import com.okb.whatsappbridge.domain.usecase.HealthCheckUseCase
 import com.okb.whatsappbridge.domain.usecase.ListenerRecoveryUseCase
@@ -22,6 +23,7 @@ import com.okb.whatsappbridge.domain.usecase.ProcessNotificationUseCase
 import com.okb.whatsappbridge.domain.usecase.RecycleBinUseCase
 import com.okb.whatsappbridge.domain.usecase.SyncMediaUseCase
 import com.okb.whatsappbridge.domain.usecase.SyncMessagesUseCase
+import com.okb.whatsappbridge.service.AndroidConsolidatedReportNotifier
 import com.okb.whatsappbridge.service.AndroidHealthAlertNotifier
 import com.okb.whatsappbridge.service.MonitoringForegroundService
 import com.okb.whatsappbridge.media.AndroidMediaContentAccess
@@ -92,6 +94,13 @@ class AppContainer(private val app: Application) {
     val backend by lazy { BackendUseCases(settingsRepository, identity, api, deviceInfo, logger) }
     val recycleBin by lazy { RecycleBinUseCase(messageRepository, mediaRepository, uploadScheduler, logger) }
     val listenerRecovery by lazy { ListenerRecoveryUseCase(systemStatus, logger) }
+    // Consolidated WhatsApp reports: PDFs downloaded for the one-tap share live in the app sandbox.
+    val consolidatedReportDirectory: File by lazy { File(app.filesDir, "consolidated") }
+    val consolidatedReports by lazy {
+        ConsolidatedReportCheckUseCase(
+            settingsRepository, identity, api, consolidatedReportDirectory, AndroidConsolidatedReportNotifier(app), logger,
+        )
+    }
     val healthCheck by lazy {
         HealthCheckUseCase(
             settingsRepository, messageRepository, systemStatus, uploadScheduler, backend, healthAlerts, logger,

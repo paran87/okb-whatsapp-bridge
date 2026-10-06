@@ -9,6 +9,9 @@ import com.okb.whatsappbridge.data.remote.dto.MediaIntentRequest
 import com.okb.whatsappbridge.data.remote.dto.MediaIntentResponse
 import com.okb.whatsappbridge.data.remote.dto.MediaCompleteRequest
 import com.okb.whatsappbridge.data.remote.dto.MediaCompleteResponse
+import com.okb.whatsappbridge.data.remote.dto.ConsolidatedDeliveryAck
+import com.okb.whatsappbridge.data.remote.dto.ConsolidatedDeliveryAckResponse
+import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
@@ -19,6 +22,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -77,6 +81,67 @@ class OkHttpBridgeApi(
         idempotencyKey = request.sha256,
     )
 
+    // The run-due call may wake a sleeping backend and render a PDF, so it gets a longer timeout.
+    override suspend fun consolidatedRunDue(config: BackendConfig): ApiResult<ConsolidatedRunDueResponse> = execute(
+        config,
+        "api/v1/consolidated-reports/run-due",
+        body = "{}",
+        ConsolidatedRunDueResponse.serializer(),
+        ConsolidatedRunDueResponse(),
+        callClient = slowClient,
+    )
+
+    override suspend fun acknowledgeConsolidatedDelivery(
+        config: BackendConfig,
+        id: String,
+        state: String,
+    ): ApiResult<ConsolidatedDeliveryAckResponse> = execute(
+        config,
+        "api/v1/consolidated-reports/$id/delivery",
+        body = json.encodeToString(ConsolidatedDeliveryAck.serializer(), ConsolidatedDeliveryAck(state)),
+        ConsolidatedDeliveryAckResponse.serializer(),
+        ConsolidatedDeliveryAckResponse(),
+    )
+
+    override suspend fun downloadConsolidatedPdf(config: BackendConfig, pdfPath: String, target: File): ApiResult<Long> {
+        val url = resolve(config.baseUrl, pdfPath) ?: return ApiResult.ConfigurationError("Invalid backend URL")
+        val builder = Request.Builder()
+            .url(url)
+            .header("Accept", "application/pdf")
+            .header("User-Agent", userAgent)
+            .header("X-OKB-Device-Id", config.deviceId)
+        config.token?.takeIf { it.isNotBlank() }?.let { builder.header("Authorization", "Bearer $it") }
+        return withContext(Dispatchers.IO) {
+            try {
+                slowClient.newCall(builder.get().build()).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        return@withContext ApiResult.HttpError(response.code, describeHttpError(response.code, response.body?.string().orEmpty()))
+                    }
+                    val body = response.body ?: return@withContext ApiResult.HttpError(response.code, "Empty PDF response")
+                    target.parentFile?.mkdirs()
+                    val partial = File(target.path + ".part")
+                    val written = partial.outputStream().use { out -> body.byteStream().copyTo(out) }
+                    if (!partial.renameTo(target)) {
+                        partial.delete()
+                        return@withContext ApiResult.ConfigurationError("Could not store the PDF")
+                    }
+                    ApiResult.Success(written, response.code)
+                }
+            } catch (e: IOException) {
+                ApiResult.NetworkError(e.javaClass.simpleName + (e.message?.let { ": $it" } ?: ""))
+            } catch (e: IllegalArgumentException) {
+                ApiResult.ConfigurationError(e.message ?: "Invalid request")
+            }
+        }
+    }
+
+    private val slowClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .readTimeout(120, TimeUnit.SECONDS)
+            .callTimeout(180, TimeUnit.SECONDS)
+            .build()
+    }
+
     private suspend fun <T> execute(
         config: BackendConfig,
         path: String,
@@ -84,6 +149,7 @@ class OkHttpBridgeApi(
         serializer: KSerializer<T>,
         emptyValue: T,
         idempotencyKey: String? = null,
+        callClient: OkHttpClient = client,
     ): ApiResult<T> {
         val url = resolve(config.baseUrl, path)
             ?: return ApiResult.ConfigurationError("Invalid backend URL")
@@ -98,7 +164,7 @@ class OkHttpBridgeApi(
 
         return withContext(Dispatchers.IO) {
             try {
-                client.newCall(builder.build()).execute().use { response ->
+                callClient.newCall(builder.build()).execute().use { response ->
                     val text = response.body?.string().orEmpty()
                     if (response.isSuccessful) {
                         // A 2xx means the backend accepted the request; a body we cannot parse

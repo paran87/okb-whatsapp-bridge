@@ -875,6 +875,25 @@ height, coordinates, report time) stay `null`, with `".010 m"` left un-normalize
    as reports (`?status=ignored` shows any that reached the backend).
 
 > Do not claim these passed until executed on the physical device.
+## Consolidated WhatsApp reports (one-tap send)
+
+The OKB backend can consolidate the flood reports it received into one PDF per reporting period (schedule
+and destination group are set in the OKB Command Center). The bridge takes part in two ways, using only
+what it already has:
+
+- **Periodic check.** The existing 15-minute background check (`ReconciliationWorker`) also calls
+  `POST /api/v1/consolidated-reports/run-due`. The backend decides whether a report is due; the phone never
+  decides. A report that is waiting is downloaded into the app sandbox (`files/consolidated/`, removed after
+  7 days).
+- **One-tap send.** The phone shows a "Consolidated flood report ready to send" notification. Tapping it
+  opens WhatsApp's share screen with the PDF attached and the short caption filled in (the caption is also
+  copied to the clipboard). Choose the destination group (e.g. *OKB Command Center*) and press **Send**.
+
+**Limitation.** WhatsApp offers no supported way for another app to open a specific group chat with an
+attachment, so the operator chooses the group in WhatsApp's picker. The bridge never sends anything by
+itself and does not use Accessibility automation or unofficial WhatsApp libraries. Because the bridge
+cannot see the final Send, the Command Center history records the time the operator opened the report in
+WhatsApp. Notifications must be allowed for the bridge; if they are blocked, the report stays pending.
 
 ## Known limitations
 

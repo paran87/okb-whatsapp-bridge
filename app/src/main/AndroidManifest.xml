@@ -73,6 +73,25 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps the operator-enabled notification listener running so authorized group messages are captured while the app is closed." />
         </service>
+        <!-- Opens WhatsApp's share screen for a consolidated report (from its notification); no UI of its own. -->
+        <activity
+            android:name=".ui.consolidated.ShareReportActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- Shares consolidated report PDFs (filesDir/consolidated) with WhatsApp, read-only, per share. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
         <receiver
             android:name=".service.BootReceiver"

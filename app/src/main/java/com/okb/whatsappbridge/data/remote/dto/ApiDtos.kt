@@ -64,3 +64,37 @@ data class MessageUploadResponse(
 ) {
     val resolvedServerId: String? get() = serverId ?: id
 }
+
+/** `POST /api/v1/consolidated-reports/run-due`: deliveries the phone should offer to the operator. */
+@Serializable
+data class ConsolidatedRunDueResponse(
+    val checkedAt: String? = null,
+    val skipped: String? = null,
+    val deliveries: List<ConsolidatedDelivery> = emptyList(),
+)
+
+/** One generated consolidated report PDF waiting to be handed to WhatsApp. */
+@Serializable
+data class ConsolidatedDelivery(
+    val id: String,
+    val kind: String? = null,
+    val fileName: String,
+    val caption: String,
+    val destinationGroup: String? = null,
+    val periodStart: String? = null,
+    val periodEnd: String? = null,
+    val reportCount: Int? = null,
+    /** API path of the PDF, relative to the backend base URL. */
+    val pdfPath: String,
+) {
+    val isTest: Boolean get() = kind == "test"
+}
+
+@Serializable
+data class ConsolidatedDeliveryAck(val state: String)
+
+@Serializable
+data class ConsolidatedDeliveryAckResponse(
+    val id: String? = null,
+    val whatsappStatus: String? = null,
+)

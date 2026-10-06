@@ -27,6 +27,7 @@ class OkbBridgeApplication : Application(), Configuration.Provider {
                     mediaSync = { container.syncMedia },
                     healthCheck = { container.healthCheck },
                     logger = { container.logger },
+                    consolidatedCheck = { container.consolidatedReports },
                 ),
             )
             .setMinimumLoggingLevel(android.util.Log.INFO)

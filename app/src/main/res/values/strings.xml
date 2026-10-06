@@ -6,4 +6,6 @@
     <string name="alert_channel_description">Warnings when background WhatsApp monitoring may be inactive.</string>
     <string name="monitoring_channel_name">Background monitoring</string>
     <string name="monitoring_channel_description">Ongoing notification that keeps WhatsApp/Viber monitoring running while the app is closed.</string>
+    <string name="report_channel_name">Consolidated reports</string>
+    <string name="report_channel_description">Consolidated flood monitoring reports ready to send to the WhatsApp group.</string>
 </resources>
