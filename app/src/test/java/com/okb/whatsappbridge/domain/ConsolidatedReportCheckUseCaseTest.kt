@@ -9,6 +9,7 @@ import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueResponse
 import com.okb.whatsappbridge.data.repository.SecureDeviceIdentityRepository
 import com.okb.whatsappbridge.domain.model.BridgeSettings
 import com.okb.whatsappbridge.domain.usecase.ConsolidatedReportCheckUseCase
+import com.okb.whatsappbridge.service.AndroidConsolidatedReportNotifier
 import com.okb.whatsappbridge.fakes.FakeBridgeApi
 import com.okb.whatsappbridge.fakes.FakeSettingsRepository
 import com.okb.whatsappbridge.fakes.RecordingLogger
@@ -55,7 +56,7 @@ class ConsolidatedReportCheckUseCaseTest {
         kind = "scheduled",
         fileName = "OKB_Consolidated_Flood_Report_2026-08-12_1200.pdf",
         caption = "📄 OKB CONSOLIDATED FLOOD MONITORING REPORT\n\nReporting Period:\nAugust 12, 2026\n06:00 AM – 12:00 PM",
-        destinationGroup = "OKB Command Center",
+        destinationGroup = "NCR Flood Monitoring",
         pdfPath = "api/v1/consolidated-reports/5f0c6a2e-1b7d-4c1e-9a77-1d2f3e4a5b6c/pdf",
     )
 
@@ -111,9 +112,18 @@ class ConsolidatedReportCheckUseCaseTest {
     }
 
     @Test
-    fun `marking shared acknowledges the hand-off`() = runTest {
+    fun `opening the share screen is reported as opened, never as sent`() = runTest {
         val api = Api(emptyList())
-        useCase(api, mutableListOf()).markShared(delivery.id)
-        assertEquals(listOf(delivery.id to "shared"), api.acks)
+        useCase(api, mutableListOf()).markOpened(delivery.id)
+        assertEquals(listOf(delivery.id to "opened"), api.acks)
+    }
+
+    @Test
+    fun `share instruction names the configured group and never claims automatic selection`() {
+        assertEquals(
+            "WhatsApp share screen will open. Select “NCR Flood Monitoring” and press Send.",
+            AndroidConsolidatedReportNotifier.shareInstruction("NCR Flood Monitoring"),
+        )
+        assertTrue(AndroidConsolidatedReportNotifier.shareInstruction(" ").contains("No destination group is configured"))
     }
 }

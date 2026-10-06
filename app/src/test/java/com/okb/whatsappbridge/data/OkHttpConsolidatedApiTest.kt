@@ -38,7 +38,7 @@ class OkHttpConsolidatedApiTest {
     @Test
     fun `run-due posts with the device token and parses deliveries`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody(
-            """{"checkedAt":"2026-08-12T04:05:00Z","generated":{"id":"x"},"skipped":null,"deliveries":[{"id":"5f0c6a2e-1b7d","kind":"test","fileName":"a.pdf","caption":"c","destinationGroup":"OKB Command Center","pdfPath":"api/v1/consolidated-reports/5f0c6a2e-1b7d/pdf","reportCount":2}]}""",
+            """{"checkedAt":"2026-08-12T04:05:00Z","generated":{"id":"x"},"skipped":null,"deliveries":[{"id":"5f0c6a2e-1b7d","kind":"test","fileName":"a.pdf","caption":"c","destinationGroup":"NCR Flood Monitoring","pdfPath":"api/v1/consolidated-reports/5f0c6a2e-1b7d/pdf","reportCount":2}]}""",
         ))
         val result = api.consolidatedRunDue(config())
         val request = server.takeRequest()

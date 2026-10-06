@@ -23,9 +23,8 @@ class AndroidConsolidatedReportNotifier(private val context: Context) : Consolid
     override fun reportReady(delivery: ConsolidatedDelivery, pdf: File): Boolean {
         if (!canPost()) return false
         ensureChannel()
-        val group = delivery.destinationGroup?.takeIf { it.isNotBlank() } ?: "the OKB Command Center group"
-        val title = if (delivery.isTest) "📄 TEST consolidated report ready to send" else "📄 Consolidated flood report ready to send"
-        val text = "Tap to open WhatsApp with the PDF attached, choose “$group” and press Send."
+        val title = if (delivery.isTest) "📄 TEST REPORT ready to send" else "📄 Consolidated flood report ready to send"
+        val text = shareInstruction(delivery.destinationGroup)
         val period = delivery.caption.lineSequence()
             .dropWhile { !it.startsWith("Reporting Period") }.drop(1).takeWhile { it.isNotBlank() }.joinToString(" ")
         val intent = PendingIntent.getActivity(
@@ -73,6 +72,16 @@ class AndroidConsolidatedReportNotifier(private val context: Context) : Consolid
 
     companion object {
         private const val CHANNEL_ID = "consolidated_reports"
+
+        /** The bridge never selects the group itself: the operator does, in WhatsApp's share screen. */
+        fun shareInstruction(group: String?): String {
+            val name = group?.trim()?.takeIf { it.isNotEmpty() }
+            return if (name != null) {
+                "WhatsApp share screen will open. Select “$name” and press Send."
+            } else {
+                "WhatsApp share screen will open. No destination group is configured in the Command Center — select the correct group and press Send."
+            }
+        }
         private const val NOTIFICATION_BASE = 2000
 
         /** Stable per report, distinct from the health alert (1001). */

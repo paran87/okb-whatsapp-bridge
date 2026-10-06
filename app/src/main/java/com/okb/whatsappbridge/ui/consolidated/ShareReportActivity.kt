@@ -23,8 +23,9 @@ import java.io.File
  *
  * Opens WhatsApp's share screen with the consolidated PDF attached and the short caption filled in, and
  * copies the caption to the clipboard as a fallback. WhatsApp provides no supported way for another app to
- * pre-select a group chat, so the operator chooses the OKB Command Center group and presses Send — the
- * bridge never sends anything by itself and uses no accessibility or unofficial WhatsApp automation.
+ * pre-select a group chat, so the operator selects the configured destination group and presses Send — the
+ * bridge never sends anything by itself and uses no accessibility or unofficial WhatsApp automation. Only
+ * "opened" is reported to the backend: whether Send was pressed cannot be observed.
  */
 class ShareReportActivity : Activity() {
 
@@ -33,7 +34,7 @@ class ShareReportActivity : Activity() {
         val id = intent.getStringExtra(EXTRA_ID).orEmpty()
         val fileName = intent.getStringExtra(EXTRA_FILE_NAME).orEmpty()
         val caption = intent.getStringExtra(EXTRA_CAPTION).orEmpty()
-        val group = intent.getStringExtra(EXTRA_GROUP)?.takeIf { it.isNotBlank() } ?: "the OKB Command Center group"
+        val group = intent.getStringExtra(EXTRA_GROUP)
         val container = (application as OkbBridgeApplication).container
 
         val file = ConsolidatedReportCheckUseCase.pdfFile(container.consolidatedReportDirectory, id, fileName)
@@ -47,9 +48,9 @@ class ShareReportActivity : Activity() {
             getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("OKB report caption", caption))
         }
         if (openShare(file, caption)) {
-            Toast.makeText(this, "Choose “$group” in WhatsApp, then press Send. The caption is also copied.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, AndroidConsolidatedReportNotifier.shareInstruction(group) + " The caption is also copied.", Toast.LENGTH_LONG).show()
             AndroidConsolidatedReportNotifier.cancel(this, id)
-            container.appScope.launch { container.consolidatedReports.markShared(id) }
+            container.appScope.launch { container.consolidatedReports.markOpened(id) }
         } else {
             Toast.makeText(this, "WhatsApp could not be opened on this phone.", Toast.LENGTH_LONG).show()
         }

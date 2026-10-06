@@ -21,7 +21,8 @@ fun interface ConsolidatedReportSink {
  * The phone only asks; the backend decides whether a consolidated report is due, generates the PDF and
  * returns the deliveries waiting for this phone. For each one the PDF is downloaded into the app sandbox
  * and a notification is shown. Nothing is sent to WhatsApp automatically: tapping the notification opens
- * WhatsApp's share screen with the PDF and caption, and the operator chooses the group and presses Send.
+ * WhatsApp's share screen with the PDF and caption, and the operator selects the destination group and
+ * presses Send. Android cannot tell whether Send was pressed, so the backend is only told "opened".
  */
 class ConsolidatedReportCheckUseCase(
     private val settings: SettingsRepository,
@@ -71,14 +72,14 @@ class ConsolidatedReportCheckUseCase(
         return notified
     }
 
-    /** Called when the operator opened the report in WhatsApp from the notification. */
-    suspend fun markShared(id: String) {
+    /** Called when the operator opened WhatsApp's share screen from the notification (not proof of sending). */
+    suspend fun markOpened(id: String) {
         val current = settings.current()
         if (!current.backendConfigured) return
-        when (val r = api.acknowledgeConsolidatedDelivery(config(current.backendUrl), id, STATE_SHARED)) {
-            is ApiResult.Success -> logger.info(TAG, "Consolidated report opened in WhatsApp")
-            is ApiResult.HttpError -> logger.warn(TAG, "Could not record the WhatsApp hand-off: ${r.message}")
-            is ApiResult.NetworkError -> logger.warn(TAG, "Could not record the WhatsApp hand-off: ${r.message}")
+        when (val r = api.acknowledgeConsolidatedDelivery(config(current.backendUrl), id, STATE_OPENED)) {
+            is ApiResult.Success -> logger.info(TAG, "Consolidated report opened in WhatsApp's share screen")
+            is ApiResult.HttpError -> logger.warn(TAG, "Could not record that WhatsApp was opened: ${r.message}")
+            is ApiResult.NetworkError -> logger.warn(TAG, "Could not record that WhatsApp was opened: ${r.message}")
             is ApiResult.ConfigurationError -> Unit
         }
     }
@@ -97,7 +98,7 @@ class ConsolidatedReportCheckUseCase(
     companion object {
         private const val TAG = "Consolidated"
         const val STATE_NOTIFIED = "notified"
-        const val STATE_SHARED = "shared"
+        const val STATE_OPENED = "opened"
         private const val RETENTION_MILLIS = 7L * 24 * 60 * 60 * 1000
         private val SAFE_NAME = Regex("^[A-Za-z0-9_.-]{1,120}\\.pdf$")
 

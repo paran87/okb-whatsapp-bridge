@@ -29,7 +29,7 @@ data class BackendConfig(
  *  - `POST /api/v1/media/complete`  (Phase 2)
  *  - `POST /api/v1/consolidated-reports/run-due`        (consolidated reports: 15-minute check)
  *  - `GET  /api/v1/consolidated-reports/{id}/pdf`       (consolidated reports: the PDF)
- *  - `POST /api/v1/consolidated-reports/{id}/delivery`  (consolidated reports: notified / shared)
+ *  - `POST /api/v1/consolidated-reports/{id}/delivery`  (consolidated reports: notified / opened)
  */
 interface BridgeApi {
     suspend fun health(config: BackendConfig): ApiResult<HealthResponse>

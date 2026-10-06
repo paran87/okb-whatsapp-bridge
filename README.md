@@ -885,15 +885,17 @@ what it already has:
   `POST /api/v1/consolidated-reports/run-due`. The backend decides whether a report is due; the phone never
   decides. A report that is waiting is downloaded into the app sandbox (`files/consolidated/`, removed after
   7 days).
-- **One-tap send.** The phone shows a "Consolidated flood report ready to send" notification. Tapping it
-  opens WhatsApp's share screen with the PDF attached and the short caption filled in (the caption is also
-  copied to the clipboard). Choose the destination group (e.g. *OKB Command Center*) and press **Send**.
+- **One-tap send.** The phone shows a "Consolidated flood report ready to send" notification ("TEST REPORT
+  ready to send" for a test). Tapping it opens WhatsApp's **share screen** with the PDF attached and the
+  short caption filled in (the caption is also copied to the clipboard). **Select the destination group
+  configured in the Command Center and press Send.**
 
 **Limitation.** WhatsApp offers no supported way for another app to open a specific group chat with an
-attachment, so the operator chooses the group in WhatsApp's picker. The bridge never sends anything by
-itself and does not use Accessibility automation or unofficial WhatsApp libraries. Because the bridge
-cannot see the final Send, the Command Center history records the time the operator opened the report in
-WhatsApp. Notifications must be allowed for the bridge; if they are blocked, the report stays pending.
+attachment, so the bridge does not select the group: the operator does, in WhatsApp's share screen. The
+bridge never sends anything by itself and does not use Accessibility automation or unofficial WhatsApp
+libraries. Android also cannot tell whether Send was pressed, so the bridge only reports that the share
+screen was **opened**; the Command Center shows "Opened in WhatsApp" and never claims a report was sent.
+Notifications must be allowed for the bridge; if they are blocked, the report stays "ready to send".
 
 ## Known limitations
 
