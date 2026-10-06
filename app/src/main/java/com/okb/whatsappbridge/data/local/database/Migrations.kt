@@ -72,5 +72,26 @@ object Migrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
+    /**
+     * v3 → v4: local delivery queue for consolidated report PDFs. Additive only: no existing table, column
+     * or row is touched (messages, media, groups, settings and the Recycle Bin are preserved).
+     */
+    val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `consolidated_report_deliveries` (`id` TEXT NOT NULL, `kind` TEXT NOT NULL, " +
+                    "`fileName` TEXT NOT NULL, `caption` TEXT NOT NULL, `sourceGroup` TEXT, `destinationGroup` TEXT, " +
+                    "`periodStart` TEXT, `periodEnd` TEXT, `reportCount` INTEGER, `pdfPath` TEXT NOT NULL, " +
+                    "`status` TEXT NOT NULL, `errorMessage` TEXT, `downloadAttempts` INTEGER NOT NULL, `pendingAck` TEXT, " +
+                    "`pendingAckError` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, " +
+                    "`downloadedAt` INTEGER, `openedAt` INTEGER, `sentAt` INTEGER, PRIMARY KEY(`id`))",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_consolidated_report_deliveries_status` " +
+                    "ON `consolidated_report_deliveries` (`status`)",
+            )
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
 }

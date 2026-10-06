@@ -11,6 +11,7 @@ import com.okb.whatsappbridge.data.remote.dto.MediaCompleteRequest
 import com.okb.whatsappbridge.data.remote.dto.MediaCompleteResponse
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedDeliveryAck
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedDeliveryAckResponse
+import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueRequest
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -82,10 +83,13 @@ class OkHttpBridgeApi(
     )
 
     // The run-due call may wake a sleeping backend and render a PDF, so it gets a longer timeout.
-    override suspend fun consolidatedRunDue(config: BackendConfig): ApiResult<ConsolidatedRunDueResponse> = execute(
+    override suspend fun consolidatedRunDue(
+        config: BackendConfig,
+        request: ConsolidatedRunDueRequest,
+    ): ApiResult<ConsolidatedRunDueResponse> = execute(
         config,
         "api/v1/consolidated-reports/run-due",
-        body = "{}",
+        body = json.encodeToString(ConsolidatedRunDueRequest.serializer(), request),
         ConsolidatedRunDueResponse.serializer(),
         ConsolidatedRunDueResponse(),
         callClient = slowClient,
@@ -95,10 +99,11 @@ class OkHttpBridgeApi(
         config: BackendConfig,
         id: String,
         state: String,
+        error: String?,
     ): ApiResult<ConsolidatedDeliveryAckResponse> = execute(
         config,
         "api/v1/consolidated-reports/$id/delivery",
-        body = json.encodeToString(ConsolidatedDeliveryAck.serializer(), ConsolidatedDeliveryAck(state)),
+        body = json.encodeToString(ConsolidatedDeliveryAck.serializer(), ConsolidatedDeliveryAck(state, error?.take(300))),
         ConsolidatedDeliveryAckResponse.serializer(),
         ConsolidatedDeliveryAckResponse(),
     )

@@ -12,7 +12,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.okb.whatsappbridge.R
-import com.okb.whatsappbridge.data.remote.dto.ConsolidatedDelivery
+import com.okb.whatsappbridge.domain.model.ConsolidatedReportDelivery
 import com.okb.whatsappbridge.domain.usecase.ConsolidatedReportSink
 import com.okb.whatsappbridge.ui.consolidated.ShareReportActivity
 import java.io.File
@@ -20,17 +20,17 @@ import java.io.File
 /** "Consolidated report ready" notification. Tapping it opens the one-tap WhatsApp share (ShareReportActivity). */
 class AndroidConsolidatedReportNotifier(private val context: Context) : ConsolidatedReportSink {
 
-    override fun reportReady(delivery: ConsolidatedDelivery, pdf: File): Boolean {
+    override fun reportReady(delivery: ConsolidatedReportDelivery, pdf: File): Boolean {
         if (!canPost()) return false
         ensureChannel()
-        val title = if (delivery.isTest) "📄 TEST REPORT ready to send" else "📄 Consolidated flood report ready to send"
-        val text = shareInstruction(delivery.destinationGroup)
+        val title = if (delivery.isTest) "📄 TEST REPORT ready to send" else "📄 Consolidated Report Ready"
+        val text = "Tap “Send to WhatsApp”: " + shareInstruction(delivery.destinationGroup)
         val period = delivery.caption.lineSequence()
             .dropWhile { !it.startsWith("Reporting Period") }.drop(1).takeWhile { it.isNotBlank() }.joinToString(" ")
         val intent = PendingIntent.getActivity(
             context,
             delivery.id.hashCode(),
-            ShareReportActivity.intent(context, delivery).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            ShareReportActivity.intent(context, delivery.id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)

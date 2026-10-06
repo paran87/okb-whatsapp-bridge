@@ -103,3 +103,53 @@ data class MediaCounts(
 ) {
     val pendingUploadTotal: Int get() = pendingUpload + uploading + retrying + uploadFailed
 }
+
+/**
+ * Where a consolidated report PDF is on this phone. The bridge never sends to WhatsApp by itself: it opens
+ * WhatsApp's share screen and the operator selects the destination group and presses Send.
+ */
+enum class ConsolidatedDeliveryStatus {
+    /** Known from the backend; the PDF is not on the phone yet (also after a failed download attempt). */
+    READY_TO_SEND,
+    DOWNLOADING,
+    /** PDF downloaded and verified; waiting for the operator to share it. */
+    READY_FOR_WHATSAPP,
+    /** The operator opened WhatsApp's share screen. Not proof of sending: the operator confirms below. */
+    OPENED_IN_WHATSAPP,
+    /** The operator confirmed in the app that the report was sent in WhatsApp. */
+    SENT,
+    FAILED,
+    ;
+
+    companion object {
+        fun of(name: String?): ConsolidatedDeliveryStatus = entries.firstOrNull { it.name == name } ?: READY_TO_SEND
+    }
+}
+
+data class ConsolidatedReportDelivery(
+    val id: String,
+    val kind: String,
+    val fileName: String,
+    val caption: String,
+    val sourceGroup: String?,
+    val destinationGroup: String?,
+    val periodStart: String?,
+    val periodEnd: String?,
+    val reportCount: Int?,
+    val pdfPath: String,
+    val status: ConsolidatedDeliveryStatus,
+    val errorMessage: String? = null,
+    val downloadAttempts: Int = 0,
+    val pendingAck: String? = null,
+    val pendingAckError: String? = null,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val downloadedAt: Long? = null,
+    val openedAt: Long? = null,
+    val sentAt: Long? = null,
+) {
+    val isTest: Boolean get() = kind == "test"
+}
+
+/** Dashboard counts: pending = not yet on the phone; ready = waiting for the operator (incl. opened). */
+data class ConsolidatedDeliveryCounts(val pending: Int = 0, val ready: Int = 0, val sent: Int = 0, val failed: Int = 0)

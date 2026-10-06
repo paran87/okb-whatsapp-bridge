@@ -10,6 +10,7 @@ import com.okb.whatsappbridge.data.remote.dto.MediaIntentResponse
 import com.okb.whatsappbridge.data.remote.dto.MediaCompleteRequest
 import com.okb.whatsappbridge.data.remote.dto.MediaCompleteResponse
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedDeliveryAckResponse
+import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueRequest
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueResponse
 import java.io.File
 
@@ -29,7 +30,7 @@ data class BackendConfig(
  *  - `POST /api/v1/media/complete`  (Phase 2)
  *  - `POST /api/v1/consolidated-reports/run-due`        (consolidated reports: 15-minute check)
  *  - `GET  /api/v1/consolidated-reports/{id}/pdf`       (consolidated reports: the PDF)
- *  - `POST /api/v1/consolidated-reports/{id}/delivery`  (consolidated reports: notified / opened)
+ *  - `POST /api/v1/consolidated-reports/{id}/delivery`  (consolidated reports: notified / opened / sent / not_sent / failed)
  */
 interface BridgeApi {
     suspend fun health(config: BackendConfig): ApiResult<HealthResponse>
@@ -39,13 +40,21 @@ interface BridgeApi {
     suspend fun mediaComplete(config: BackendConfig, request: MediaCompleteRequest): ApiResult<MediaCompleteResponse>
 
     // Consolidated reports. Defaults keep other implementations (test fakes) source-compatible.
-    suspend fun consolidatedRunDue(config: BackendConfig): ApiResult<ConsolidatedRunDueResponse> =
+    suspend fun consolidatedRunDue(
+        config: BackendConfig,
+        request: ConsolidatedRunDueRequest = ConsolidatedRunDueRequest(),
+    ): ApiResult<ConsolidatedRunDueResponse> =
         ApiResult.ConfigurationError("Consolidated reports are not supported")
 
     /** Downloads the PDF at [pdfPath] into [target]; returns the number of bytes written. */
     suspend fun downloadConsolidatedPdf(config: BackendConfig, pdfPath: String, target: File): ApiResult<Long> =
         ApiResult.ConfigurationError("Consolidated reports are not supported")
 
-    suspend fun acknowledgeConsolidatedDelivery(config: BackendConfig, id: String, state: String): ApiResult<ConsolidatedDeliveryAckResponse> =
+    suspend fun acknowledgeConsolidatedDelivery(
+        config: BackendConfig,
+        id: String,
+        state: String,
+        error: String? = null,
+    ): ApiResult<ConsolidatedDeliveryAckResponse> =
         ApiResult.ConfigurationError("Consolidated reports are not supported")
 }

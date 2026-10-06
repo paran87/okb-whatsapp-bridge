@@ -5,17 +5,21 @@ import com.okb.whatsappbridge.data.remote.api.BackendConfig
 import com.okb.whatsappbridge.data.remote.api.BridgeApi
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedDelivery
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedDeliveryAckResponse
+import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueRequest
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueResponse
 import com.okb.whatsappbridge.data.repository.SecureDeviceIdentityRepository
 import com.okb.whatsappbridge.domain.model.BridgeSettings
+import com.okb.whatsappbridge.domain.model.ConsolidatedDeliveryStatus
 import com.okb.whatsappbridge.domain.usecase.ConsolidatedReportCheckUseCase
-import com.okb.whatsappbridge.service.AndroidConsolidatedReportNotifier
 import com.okb.whatsappbridge.fakes.FakeBridgeApi
+import com.okb.whatsappbridge.fakes.FakeConsolidatedDeliveryRepository
 import com.okb.whatsappbridge.fakes.FakeSettingsRepository
 import com.okb.whatsappbridge.fakes.RecordingLogger
+import com.okb.whatsappbridge.service.AndroidConsolidatedReportNotifier
 import com.okb.whatsappbridge.util.security.InMemorySecretStore
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -27,102 +31,208 @@ class ConsolidatedReportCheckUseCaseTest {
 
     @get:Rule val tmp = TemporaryFolder()
 
-    private class Api(private val deliveries: List<ConsolidatedDelivery>) : BridgeApi by FakeBridgeApi() {
-        var runDueCalls = 0
+    private val validPdf = "%PDF-1.7\n1 0 obj << >> endobj\ntrailer << >>\n%%EOF\n"
+
+    /** Backend stand-in: a list of pending deliveries plus switchable failures. */
+    private inner class Api(var deliveries: List<ConsolidatedDelivery>) : BridgeApi by FakeBridgeApi() {
+        var online = true
+        var downloadBody: String = validPdf
+        var downloadHttpError: Int? = null
+        var ackOk = true
+        val requests = mutableListOf<ConsolidatedRunDueRequest>()
         val downloads = mutableListOf<String>()
         val acks = mutableListOf<Pair<String, String>>()
-        var runDueResult: ApiResult<ConsolidatedRunDueResponse>? = null
 
-        override suspend fun consolidatedRunDue(config: BackendConfig): ApiResult<ConsolidatedRunDueResponse> {
-            runDueCalls++
-            return runDueResult ?: ApiResult.Success(ConsolidatedRunDueResponse(deliveries = deliveries), 200)
+        override suspend fun consolidatedRunDue(config: BackendConfig, request: ConsolidatedRunDueRequest): ApiResult<ConsolidatedRunDueResponse> {
+            if (!online) return ApiResult.NetworkError("UnknownHostException")
+            requests += request
+            return ApiResult.Success(ConsolidatedRunDueResponse(deliveries = deliveries), 200)
         }
 
         override suspend fun downloadConsolidatedPdf(config: BackendConfig, pdfPath: String, target: File): ApiResult<Long> {
+            if (!online) return ApiResult.NetworkError("SocketTimeoutException")
             downloads += pdfPath
+            downloadHttpError?.let { return ApiResult.HttpError(it, "HTTP $it") }
             target.parentFile?.mkdirs()
-            target.writeText("%PDF-1.7")
-            return ApiResult.Success(8, 200)
+            target.writeText(downloadBody)
+            return ApiResult.Success(target.length(), 200)
         }
 
-        override suspend fun acknowledgeConsolidatedDelivery(config: BackendConfig, id: String, state: String): ApiResult<ConsolidatedDeliveryAckResponse> {
+        override suspend fun acknowledgeConsolidatedDelivery(config: BackendConfig, id: String, state: String, error: String?): ApiResult<ConsolidatedDeliveryAckResponse> {
+            if (!online || !ackOk) return ApiResult.NetworkError("offline")
             acks += id to state
             return ApiResult.Success(ConsolidatedDeliveryAckResponse(id, state), 200)
         }
     }
 
-    private val delivery = ConsolidatedDelivery(
+    private val remote = ConsolidatedDelivery(
         id = "5f0c6a2e-1b7d-4c1e-9a77-1d2f3e4a5b6c",
         kind = "scheduled",
-        fileName = "OKB_Consolidated_Flood_Report_2026-08-12_1200.pdf",
-        caption = "📄 OKB CONSOLIDATED FLOOD MONITORING REPORT\n\nReporting Period:\nAugust 12, 2026\n06:00 AM – 12:00 PM",
-        destinationGroup = "NCR Flood Monitoring",
+        fileName = "OKB_Consolidated_Flood_Report_2026-10-06_1800.pdf",
+        caption = "📄 OKB CONSOLIDATED FLOOD MONITORING REPORT",
+        destinationGroup = "OKB COMMAND CENTER",
+        sourceGroup = "NMDEO FLOOD MONITORING",
         pdfPath = "api/v1/consolidated-reports/5f0c6a2e-1b7d-4c1e-9a77-1d2f3e4a5b6c/pdf",
     )
 
-    private fun useCase(api: BridgeApi, ready: MutableList<ConsolidatedDelivery>, canNotify: Boolean = true, url: String = "https://okb.test") =
-        ConsolidatedReportCheckUseCase(
-            FakeSettingsRepository(BridgeSettings(backendUrl = url)),
-            SecureDeviceIdentityRepository(InMemorySecretStore()),
-            api,
-            tmp.root,
-            { d, _ -> if (canNotify) ready += d; canNotify },
-            RecordingLogger(),
-        )
+    private val repo = FakeConsolidatedDeliveryRepository()
+    private val notified = mutableListOf<String>()
+    private val settings = FakeSettingsRepository(
+        BridgeSettings(backendUrl = "https://okb.test", sourceGroupName = "NMDEO FLOOD MONITORING", destinationGroupName = "OKB COMMAND CENTER"),
+    )
+
+    private fun useCase(api: BridgeApi, canNotify: Boolean = true) = ConsolidatedReportCheckUseCase(
+        settings, SecureDeviceIdentityRepository(InMemorySecretStore()), api, repo, tmp.root,
+        { d, _ -> if (canNotify) notified += d.id; canNotify }, RecordingLogger(),
+    )
+
+    private suspend fun status() = repo.get(remote.id)?.status
 
     @Test
-    fun `ready report is downloaded once, notified and acknowledged`() = runTest {
-        val api = Api(listOf(delivery))
-        val ready = mutableListOf<ConsolidatedDelivery>()
-        assertEquals(1, useCase(api, ready)())
-        assertEquals(listOf(delivery.pdfPath), api.downloads)
-        assertEquals(listOf(delivery.id to "notified"), api.acks)
-        assertEquals(listOf(delivery), ready)
-        assertTrue(ConsolidatedReportCheckUseCase.pdfFile(tmp.root, delivery)!!.exists())
+    fun `TEST 5 - a pending report is downloaded, verified as a PDF and offered once`() = runTest {
+        val api = Api(listOf(remote))
+        val result = useCase(api)()
+        assertEquals(1, result.newlyReady)
+        assertEquals(ConsolidatedDeliveryStatus.READY_FOR_WHATSAPP, status())
+        assertEquals(listOf(remote.pdfPath), api.downloads)
+        assertEquals(listOf(remote.id), notified)
+        assertEquals(listOf(remote.id to "notified"), api.acks)
+        assertTrue(ConsolidatedReportCheckUseCase.isPdf(ConsolidatedReportCheckUseCase.pdfFile(tmp.root, remote.id, remote.fileName)!!))
+        // Both groups travel with the check so the backend knows this phone's configuration.
+        assertEquals(ConsolidatedRunDueRequest("NMDEO FLOOD MONITORING", "OKB COMMAND CENTER"), api.requests.single())
+    }
 
-        // A resend of the same report reuses the PDF already on the phone.
-        useCase(api, ready)()
+    @Test
+    fun `TEST 10 - a duplicate sync never downloads or notifies the same report twice`() = runTest {
+        val api = Api(listOf(remote))
+        val uc = useCase(api)
+        uc()
+        uc() // the backend still lists it (e.g. its "notified" acknowledgement was lost)
+        uc()
+        assertEquals(1, api.downloads.size)
+        assertEquals(1, notified.size)
+        assertEquals(1, repo.rows.size)
+    }
+
+    @Test
+    fun `a download that is not a PDF is rejected and retried, then fails after five attempts`() = runTest {
+        val api = Api(listOf(remote)).apply { downloadBody = "<html>Login required</html>" }
+        val uc = useCase(api)
+        uc()
+        assertEquals(ConsolidatedDeliveryStatus.READY_TO_SEND, status())
+        assertEquals("Downloaded file is not a PDF", repo.get(remote.id)!!.errorMessage)
+        repeat(4) { uc() }
+        assertEquals(ConsolidatedDeliveryStatus.FAILED, status())
+        assertEquals(5, api.downloads.size)
+        assertTrue(api.acks.contains(remote.id to "failed"))
+        assertTrue(notified.isEmpty())
+        assertFalse(ConsolidatedReportCheckUseCase.pdfFile(tmp.root, remote.id, remote.fileName)!!.exists())
+    }
+
+    @Test
+    fun `an expired or deleted report (404) fails immediately`() = runTest {
+        val api = Api(listOf(remote)).apply { downloadHttpError = 404 }
+        useCase(api)()
+        assertEquals(ConsolidatedDeliveryStatus.FAILED, status())
+        assertEquals(listOf(remote.id to "failed"), api.acks)
+    }
+
+    @Test
+    fun `TEST 9 - offline keeps the report pending and the acknowledgement is delivered later`() = runTest {
+        val api = Api(listOf(remote)).apply { online = false }
+        val uc = useCase(api)
+        assertEquals("Backend unreachable", uc().error)
+        assertNull(repo.get(remote.id))
+
+        // Online for the download, but the acknowledgement is lost.
+        api.online = true
+        api.ackOk = false
+        uc()
+        assertEquals(ConsolidatedDeliveryStatus.READY_FOR_WHATSAPP, status())
+        assertEquals("notified", repo.get(remote.id)!!.pendingAck)
+
+        // Next check: the acknowledgement is retried first; nothing is downloaded again.
+        api.ackOk = true
+        api.deliveries = emptyList()
+        uc()
+        assertEquals(listOf(remote.id to "notified"), api.acks)
+        assertNull(repo.get(remote.id)!!.pendingAck)
         assertEquals(1, api.downloads.size)
     }
 
     @Test
-    fun `nothing is acknowledged when notifications are disabled`() = runTest {
-        val api = Api(listOf(delivery))
-        assertEquals(0, useCase(api, mutableListOf(), canNotify = false)())
-        assertTrue(api.acks.isEmpty())
+    fun `TEST 8 - opening WhatsApp is not sending, and a cancelled share stays ready to send`() = runTest {
+        val api = Api(listOf(remote))
+        val uc = useCase(api)
+        uc()
+        uc.markOpened(remote.id)
+        assertEquals(ConsolidatedDeliveryStatus.OPENED_IN_WHATSAPP, status())
+        uc.markNotSent(remote.id)
+        assertEquals(ConsolidatedDeliveryStatus.READY_FOR_WHATSAPP, status())
+        assertNull(repo.get(remote.id)!!.sentAt)
+        assertEquals(listOf("notified", "opened", "not_sent"), api.acks.map { it.second })
+        assertFalse(api.acks.any { it.second == "sent" })
     }
 
     @Test
-    fun `no backend configured means no call`() = runTest {
-        val api = Api(listOf(delivery))
-        useCase(api, mutableListOf(), url = "")()
-        assertEquals(0, api.runDueCalls)
+    fun `only the operator's confirmation marks a report sent`() = runTest {
+        val api = Api(listOf(remote))
+        val uc = useCase(api)
+        uc()
+        uc.markOpened(remote.id)
+        uc.confirmSent(remote.id)
+        val d = repo.get(remote.id)!!
+        assertEquals(ConsolidatedDeliveryStatus.SENT, d.status)
+        assertTrue(d.sentAt != null)
+        assertEquals("sent", api.acks.last().second)
     }
 
     @Test
-    fun `backend without consolidated storage is ignored quietly`() = runTest {
-        val api = Api(emptyList()).apply { runDueResult = ApiResult.HttpError(503, "HTTP 503") }
-        assertEquals(0, useCase(api, mutableListOf())())
+    fun `a Resend from the Command Center offers the report again without downloading it again`() = runTest {
+        val api = Api(listOf(remote))
+        val uc = useCase(api)
+        uc()
+        uc.markOpened(remote.id)
+        uc.confirmSent(remote.id)
+        uc() // backend lists it as pending again
+        assertEquals(ConsolidatedDeliveryStatus.READY_FOR_WHATSAPP, status())
+        assertEquals(1, api.downloads.size)
+        assertEquals(2, notified.size)
     }
 
     @Test
-    fun `unsafe file names are never written`() {
-        assertNull(ConsolidatedReportCheckUseCase.pdfFile(tmp.root, delivery.copy(fileName = "../../evil.pdf")))
-        assertNull(ConsolidatedReportCheckUseCase.pdfFile(tmp.root, delivery.copy(id = "../x")))
+    fun `send re-downloads a PDF that is no longer on the phone`() = runTest {
+        val api = Api(listOf(remote))
+        val uc = useCase(api)
+        uc()
+        ConsolidatedReportCheckUseCase.pdfFile(tmp.root, remote.id, remote.fileName)!!.delete()
+        val (target, problem) = uc.prepareShare(remote.id)
+        assertNull(problem)
+        assertTrue(target!!.file.exists())
+        assertEquals(2, api.downloads.size)
     }
 
     @Test
-    fun `opening the share screen is reported as opened, never as sent`() = runTest {
-        val api = Api(emptyList())
-        useCase(api, mutableListOf()).markOpened(delivery.id)
-        assertEquals(listOf(delivery.id to "opened"), api.acks)
+    fun `notifications blocked - the report is still ready in the app`() = runTest {
+        useCase(Api(listOf(remote)), canNotify = false)()
+        assertEquals(ConsolidatedDeliveryStatus.READY_FOR_WHATSAPP, status())
+    }
+
+    @Test
+    fun `unsafe file names are never written`() = runTest {
+        assertNull(ConsolidatedReportCheckUseCase.pdfFile(tmp.root, remote.id, "../../evil.pdf"))
+        assertNull(ConsolidatedReportCheckUseCase.pdfFile(tmp.root, "../x", remote.fileName))
+        val api = Api(listOf(remote.copy(fileName = "../evil.pdf")))
+        useCase(api)()
+        assertEquals(ConsolidatedDeliveryStatus.FAILED, status())
+        assertTrue(api.downloads.isEmpty())
     }
 
     @Test
     fun `share instruction names the configured group and never claims automatic selection`() {
         assertEquals(
-            "WhatsApp share screen will open. Select “NCR Flood Monitoring” and press Send.",
-            AndroidConsolidatedReportNotifier.shareInstruction("NCR Flood Monitoring"),
+            "WhatsApp share screen will open. Select “OKB COMMAND CENTER” and press Send.",
+            AndroidConsolidatedReportNotifier.shareInstruction("OKB COMMAND CENTER"),
         )
         assertTrue(AndroidConsolidatedReportNotifier.shareInstruction(" ").contains("No destination group is configured"))
     }

@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.okb.whatsappbridge.AppContainer
 import com.okb.whatsappbridge.domain.model.BridgeSettings
+import com.okb.whatsappbridge.domain.model.ConsolidatedDeliveryCounts
+import com.okb.whatsappbridge.domain.model.ConsolidatedReportDelivery
 import com.okb.whatsappbridge.domain.model.MonitoringState
 import com.okb.whatsappbridge.domain.model.MediaCounts
 import com.okb.whatsappbridge.domain.model.QueueCounts
@@ -15,6 +17,7 @@ import com.okb.whatsappbridge.ui.components.Formatters
 import com.okb.whatsappbridge.util.security.Redactor
 import com.okb.whatsappbridge.worker.ReconciliationState
 import com.okb.whatsappbridge.worker.SyncWorkerState
+import com.okb.whatsappbridge.whatsapp.ReportGroups
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -59,6 +62,8 @@ data class StatusUiState(
     val lastMediaCaptureAt: Long? = null,
     val lastMediaUploadAt: Long? = null,
     val mediaUploadWorker: SyncWorkerState = SyncWorkerState.IDLE,
+    val deliveries: List<ConsolidatedReportDelivery> = emptyList(),
+    val deliveryCounts: ConsolidatedDeliveryCounts = ConsolidatedDeliveryCounts(),
     val loaded: Boolean = false,
 ) {
     val system: SystemStatus? get() = polled.system
@@ -123,7 +128,12 @@ class StatusViewModel(private val container: AppContainer) : ViewModel() {
         container.uploadScheduler.observeMediaUploadState(),
     ) { counts, today, lastCapture, lastUpload, worker -> MediaFlowState(counts, today, lastCapture, lastUpload, worker) }
 
-    val state: StateFlow<StatusUiState> = combine(base, derived, mediaFlow) { s, d, m ->
+    private val deliveryFlow = combine(
+        container.consolidatedDeliveries.observeRecent(),
+        container.consolidatedDeliveries.observeCounts(),
+    ) { list, counts -> list to counts }
+
+    val state: StateFlow<StatusUiState> = combine(base, derived, mediaFlow, deliveryFlow) { s, d, m, deliveries ->
         s.copy(
             latestMessageAt = d.latest,
             uploadWorker = d.worker,
@@ -134,6 +144,8 @@ class StatusViewModel(private val container: AppContainer) : ViewModel() {
             lastMediaCaptureAt = m.lastCapture,
             lastMediaUploadAt = m.lastUpload,
             mediaUploadWorker = m.worker,
+            deliveries = deliveries.first,
+            deliveryCounts = deliveries.second,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StatusUiState())
 
@@ -283,6 +295,55 @@ class StatusViewModel(private val container: AppContainer) : ViewModel() {
         container.uploadScheduler.requestMediaUpload(SyncTrigger.MANUAL)
         val health = container.backend.checkHealth()
         _events.emit(if (health.ok) "Saved. Backend ${health.message}" else "Saved, but backend check failed: ${health.message}")
+    }
+
+    /** Saves the two WhatsApp report groups (stored separately) and tells the backend when it is configured. */
+    fun saveReportGroups(source: String, destination: String) = runBusy {
+        ReportGroups.validate(source, destination)?.let {
+            _events.emit(it)
+            return@runBusy
+        }
+        container.settingsRepository.setSourceGroupName(source)
+        container.settingsRepository.setDestinationGroupName(destination)
+        container.logger.info(
+            "Groups",
+            "Source group ${if (source.isBlank()) "cleared (Groups allowlist used)" else "configured: \"${source.trim()}\""}; " +
+                "destination group ${if (destination.isBlank()) "cleared" else "configured: \"${destination.trim()}\""}",
+        )
+        val current = container.settingsRepository.current()
+        if (current.backendConfigured) {
+            val result = container.backend.registerDevice()
+            _events.emit(if (result.ok) "Groups saved and sent to the backend" else "Groups saved on the phone; backend not updated: ${result.message}")
+        } else {
+            _events.emit("Groups saved")
+        }
+    }
+
+    /** "Check now": asks the backend for consolidated reports waiting for this phone. */
+    fun checkReportsNow() = runBusy {
+        val result = container.consolidatedReports()
+        _events.emit(
+            when {
+                result.error != null -> "Report check failed: ${result.error}"
+                result.warning != null -> result.warning
+                result.newlyReady > 0 -> "${result.newlyReady} consolidated report(s) ready to send"
+                else -> "No new consolidated reports"
+            },
+        )
+    }
+
+    fun confirmReportSent(id: String) {
+        viewModelScope.launch {
+            container.consolidatedReports.confirmSent(id)
+            _events.emit("Marked as sent")
+        }
+    }
+
+    fun markReportNotSent(id: String) {
+        viewModelScope.launch {
+            container.consolidatedReports.markNotSent(id)
+            _events.emit("Kept as ready to send")
+        }
     }
 
     fun saveDeviceName(name: String) {

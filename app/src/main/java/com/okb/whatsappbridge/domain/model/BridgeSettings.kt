@@ -30,8 +30,15 @@ data class BridgeSettings(
     val lastMediaCaptureAt: Long? = null,
     val lastMediaUploadAt: Long? = null,
     val lastMediaError: String? = null,
+    // WhatsApp report groups: two independent settings with different purposes.
+    /** Group whose notifications are captured as field reports (blank = use the Groups allowlist). */
+    val sourceGroupName: String = "",
+    /** Group the consolidated report PDF is shared to. Never used to capture incoming reports. */
+    val destinationGroupName: String = "",
 ) {
     val backendConfigured: Boolean get() = backendUrl.isNotBlank()
+    val sourceGroupConfigured: Boolean get() = sourceGroupName.isNotBlank()
+    val destinationGroupConfigured: Boolean get() = destinationGroupName.isNotBlank()
 }
 
 /** Keys of the key/value settings table. */
@@ -58,4 +65,6 @@ object SettingKeys {
     const val LAST_MEDIA_CAPTURE_AT = "last_media_capture_at"
     const val LAST_MEDIA_UPLOAD_AT = "last_media_upload_at"
     const val LAST_MEDIA_ERROR = "last_media_error"
+    const val SOURCE_GROUP_NAME = "source_group_name"
+    const val DESTINATION_GROUP_NAME = "destination_group_name"
 }

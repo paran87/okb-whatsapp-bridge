@@ -23,6 +23,9 @@ import com.okb.whatsappbridge.ui.components.Panel
 import com.okb.whatsappbridge.ui.components.StatusLevel
 import com.okb.whatsappbridge.ui.components.StatusLine
 import com.okb.whatsappbridge.ui.components.WarningBanner
+import com.okb.whatsappbridge.ui.consolidated.ConsolidatedReportCard
+import com.okb.whatsappbridge.ui.consolidated.ReportGroupsStatusPanel
+import com.okb.whatsappbridge.ui.consolidated.needsAttention
 import com.okb.whatsappbridge.ui.onboarding.SetupChecklist
 import com.okb.whatsappbridge.ui.onboarding.SetupStep
 import com.okb.whatsappbridge.util.system.SystemSettingsIntents
@@ -37,6 +40,11 @@ fun DashboardScreen(
     onOpenSettings: () -> Unit,
     onOpenDiagnostics: () -> Unit,
     onReconnectListener: () -> Unit = {},
+    busy: Boolean = false,
+    onCheckReports: () -> Unit = {},
+    onSendReport: (String) -> Unit = {},
+    onConfirmReportSent: (String) -> Unit = {},
+    onReportNotSent: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val settings = state.settings
@@ -47,7 +55,12 @@ fun DashboardScreen(
         SetupStep("Grant Notification Access", system?.notificationAccessGranted == true, "Open") {
             SystemSettingsIntents.openNotificationAccess(context)
         },
-        SetupStep("Authorize at least one WhatsApp group", state.authorizedGroups > 0, "Groups", onOpenGroups),
+        SetupStep(
+            "Set the WhatsApp source group (or authorize a group)",
+            settings.sourceGroupConfigured || state.authorizedGroups > 0,
+            "Settings",
+            if (state.authorizedGroups > 0) onOpenGroups else onOpenSettings,
+        ),
         SetupStep("Configure the backend URL", settings.backendConfigured, "Settings", onOpenSettings),
         SetupStep("Turn on Background Monitoring", settings.monitoringEnabled, "Enable") { onToggleMonitoring(true) },
     )
@@ -59,6 +72,20 @@ fun DashboardScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (state.loaded) warnings(state, context, onReconnectListener)
+
+        // Consolidated reports waiting for the operator come first: they need a tap to reach WhatsApp.
+        state.deliveries.filter { it.needsAttention(now) }.forEach { delivery ->
+            item(key = "delivery-${delivery.id}", span = { GridItemSpan(maxLineSpan) }) {
+                ConsolidatedReportCard(
+                    delivery = delivery,
+                    settings = settings,
+                    onSend = { onSendReport(delivery.id) },
+                    onConfirmSent = { onConfirmReportSent(delivery.id) },
+                    onNotSent = { onReportNotSent(delivery.id) },
+                    onRetry = onCheckReports,
+                )
+            }
+        }
 
         if (state.loaded && steps.any { !it.done }) {
             item(span = { GridItemSpan(maxLineSpan) }) { SetupChecklist(steps) }
@@ -101,10 +128,20 @@ fun DashboardScreen(
         }
 
         item {
+            ReportGroupsStatusPanel(
+                settings = settings,
+                counts = state.deliveryCounts,
+                onCheckNow = onCheckReports,
+                onOpenSettings = onOpenSettings,
+                busy = busy,
+            )
+        }
+
+        item {
             MetricTile(
                 label = "Messages Today",
                 value = state.capturedToday.toString(),
-                caption = "Captured from ${state.authorizedGroups} authorized group(s)",
+                caption = if (settings.sourceGroupConfigured) "Captured from the source group" else "Captured from ${state.authorizedGroups} authorized group(s)",
             )
         }
         item {

@@ -11,88 +11,115 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import com.okb.whatsappbridge.OkbBridgeApplication
-import com.okb.whatsappbridge.data.remote.dto.ConsolidatedDelivery
-import com.okb.whatsappbridge.domain.usecase.ConsolidatedReportCheckUseCase
 import com.okb.whatsappbridge.service.AndroidConsolidatedReportNotifier
+import com.okb.whatsappbridge.util.logging.BridgeLogger
 import com.okb.whatsappbridge.whatsapp.WhatsAppPackages
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.io.File
 
 /**
- * Target of the "Consolidated report ready" notification (no UI of its own).
+ * "Send to WhatsApp" (from the report notification or the Dashboard card). No UI of its own.
  *
- * Opens WhatsApp's share screen with the consolidated PDF attached and the short caption filled in, and
- * copies the caption to the clipboard as a fallback. WhatsApp provides no supported way for another app to
- * pre-select a group chat, so the operator selects the configured destination group and presses Send — the
- * bridge never sends anything by itself and uses no accessibility or unofficial WhatsApp automation. Only
- * "opened" is reported to the backend: whether Send was pressed cannot be observed.
+ * Opens WhatsApp's share screen with the consolidated PDF attached and the short caption filled in, and copies
+ * the caption to the clipboard as a fallback. WhatsApp provides no supported way for another app to pre-select
+ * a group chat, so the operator selects the configured DESTINATION group and presses Send. The bridge never
+ * sends anything by itself and uses no accessibility or unofficial WhatsApp automation. Opening the share
+ * screen is recorded as "opened in WhatsApp" only; the operator confirms "sent" in the app afterwards.
+ *
+ * Future automation (e.g. an AccessibilityService) would replace only [WhatsAppShare.launch]; the delivery
+ * queue and its states stay the same.
  */
 class ShareReportActivity : Activity() {
+
+    private val scope = MainScope()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val id = intent.getStringExtra(EXTRA_ID).orEmpty()
-        val fileName = intent.getStringExtra(EXTRA_FILE_NAME).orEmpty()
-        val caption = intent.getStringExtra(EXTRA_CAPTION).orEmpty()
-        val group = intent.getStringExtra(EXTRA_GROUP)
         val container = (application as OkbBridgeApplication).container
+        val useCase = container.consolidatedReports
 
-        val file = ConsolidatedReportCheckUseCase.pdfFile(container.consolidatedReportDirectory, id, fileName)
-        if (file == null || !file.exists()) {
-            Toast.makeText(this, "The report file is no longer on this phone. Use Resend in the Command Center.", Toast.LENGTH_LONG).show()
+        scope.launch {
+            val (target, problem) = useCase.prepareShare(id)
+            if (target == null) {
+                Toast.makeText(this@ShareReportActivity, problem ?: "The report could not be prepared.", Toast.LENGTH_LONG).show()
+                finish()
+                return@launch
+            }
+            val destination = target.delivery.destinationGroup?.takeIf { it.isNotBlank() }
+                ?: container.settingsRepository.getDestinationGroupName().takeIf { it.isNotBlank() }
+            val caption = target.delivery.caption
+            if (caption.isNotBlank()) {
+                getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("OKB report caption", caption))
+            }
+            when (val result = WhatsAppShare.launch(this@ShareReportActivity, target.file, caption, container.logger)) {
+                null -> {
+                    Toast.makeText(
+                        this@ShareReportActivity,
+                        AndroidConsolidatedReportNotifier.shareInstruction(destination) + " Then come back and confirm.",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    AndroidConsolidatedReportNotifier.cancel(this@ShareReportActivity, id)
+                    container.appScope.launch { useCase.markOpened(id) }
+                }
+                else -> {
+                    Toast.makeText(this@ShareReportActivity, result, Toast.LENGTH_LONG).show()
+                    container.appScope.launch { useCase.recordShareProblem(id, result) }
+                }
+            }
             finish()
-            return
         }
-
-        if (caption.isNotBlank()) {
-            getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("OKB report caption", caption))
-        }
-        if (openShare(file, caption)) {
-            Toast.makeText(this, AndroidConsolidatedReportNotifier.shareInstruction(group) + " The caption is also copied.", Toast.LENGTH_LONG).show()
-            AndroidConsolidatedReportNotifier.cancel(this, id)
-            container.appScope.launch { container.consolidatedReports.markOpened(id) }
-        } else {
-            Toast.makeText(this, "WhatsApp could not be opened on this phone.", Toast.LENGTH_LONG).show()
-        }
-        finish()
     }
 
-    private fun openShare(file: File, caption: String): Boolean {
-        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+    override fun onDestroy() {
+        scope.cancel()
+        super.onDestroy()
+    }
+
+    companion object {
+        private const val EXTRA_ID = "okb.consolidated.id"
+
+        fun intent(context: Context, deliveryId: String): Intent =
+            Intent(context, ShareReportActivity::class.java).putExtra(EXTRA_ID, deliveryId)
+    }
+}
+
+/** The standard Android share flow for a PDF, preferring WhatsApp (then WhatsApp Business) when installed. */
+object WhatsAppShare {
+
+    /** Starts the share flow. Returns null on success, or a message describing why it could not start. */
+    fun launch(activity: Activity, file: File, caption: String, logger: BridgeLogger? = null): String? {
+        val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", file)
         val share = Intent(Intent.ACTION_SEND)
             .setType("application/pdf")
             .putExtra(Intent.EXTRA_STREAM, uri)
             .putExtra(Intent.EXTRA_TEXT, caption)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         share.clipData = ClipData.newRawUri(file.name, uri)
-        val target = listOf(WhatsAppPackages.WHATSAPP, WhatsAppPackages.WHATSAPP_BUSINESS).firstOrNull(::isInstalled)
+        val whatsApp = listOf(WhatsAppPackages.WHATSAPP, WhatsAppPackages.WHATSAPP_BUSINESS).firstOrNull { isInstalled(activity, it) }
         return try {
-            if (target != null) startActivity(share.setPackage(target))
-            else startActivity(Intent.createChooser(share, "Send consolidated report"))
-            true
+            if (whatsApp != null) {
+                activity.startActivity(share.setPackage(whatsApp))
+                logger?.info("Delivery", "Share intent launched (${WhatsAppPackages.displayName(whatsApp)}) for ${file.name}")
+            } else {
+                // WhatsApp is not installed: offer the system share sheet so the PDF can still be passed on.
+                activity.startActivity(Intent.createChooser(share, "Send consolidated report"))
+                logger?.warn("Delivery", "WhatsApp is not installed; system share sheet opened for ${file.name}")
+            }
+            null
         } catch (_: ActivityNotFoundException) {
-            false
+            "No app on this phone can share a PDF (is WhatsApp installed?)."
+        } catch (e: SecurityException) {
+            "The PDF could not be shared: ${e.javaClass.simpleName}"
         }
     }
 
-    private fun isInstalled(pkg: String): Boolean = try {
-        packageManager.getPackageInfo(pkg, 0)
+    private fun isInstalled(context: Context, pkg: String): Boolean = try {
+        context.packageManager.getPackageInfo(pkg, 0)
         true
     } catch (_: PackageManager.NameNotFoundException) {
         false
-    }
-
-    companion object {
-        private const val EXTRA_ID = "okb.consolidated.id"
-        private const val EXTRA_FILE_NAME = "okb.consolidated.fileName"
-        private const val EXTRA_CAPTION = "okb.consolidated.caption"
-        private const val EXTRA_GROUP = "okb.consolidated.group"
-
-        fun intent(context: Context, delivery: ConsolidatedDelivery): Intent =
-            Intent(context, ShareReportActivity::class.java)
-                .putExtra(EXTRA_ID, delivery.id)
-                .putExtra(EXTRA_FILE_NAME, delivery.fileName)
-                .putExtra(EXTRA_CAPTION, delivery.caption)
-                .putExtra(EXTRA_GROUP, delivery.destinationGroup)
     }
 }

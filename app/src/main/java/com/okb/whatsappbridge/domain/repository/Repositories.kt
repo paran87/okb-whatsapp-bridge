@@ -3,6 +3,8 @@ package com.okb.whatsappbridge.domain.repository
 import com.okb.whatsappbridge.domain.model.BridgeLogEntry
 import com.okb.whatsappbridge.domain.model.BridgeMessage
 import com.okb.whatsappbridge.domain.model.BridgeSettings
+import com.okb.whatsappbridge.domain.model.ConsolidatedDeliveryCounts
+import com.okb.whatsappbridge.domain.model.ConsolidatedReportDelivery
 import com.okb.whatsappbridge.domain.model.MediaStatus
 import com.okb.whatsappbridge.domain.model.MediaType
 import com.okb.whatsappbridge.domain.model.MonitoredGroup
@@ -119,6 +121,10 @@ interface SettingsRepository {
     suspend fun recordMediaCapture(at: Long)
     suspend fun recordMediaUploadSuccess(at: Long)
     suspend fun recordMediaFailure(at: Long, error: String)
+    suspend fun getSourceGroupName(): String = current().sourceGroupName
+    suspend fun setSourceGroupName(name: String)
+    suspend fun getDestinationGroupName(): String = current().destinationGroupName
+    suspend fun setDestinationGroupName(name: String)
 }
 
 /** Device identity and credentials. Backed by Android Keystore encryption. */
@@ -143,4 +149,14 @@ interface UploadScheduler {
     fun requestMediaUpload(trigger: SyncTrigger = SyncTrigger.IMMEDIATE)
     /** Ensures the 15-minute reconciliation / health-check work is scheduled. */
     fun ensurePeriodicReconciliation()
+}
+
+/** Local queue of consolidated report deliveries (Room). */
+interface ConsolidatedDeliveryRepository {
+    suspend fun get(id: String): ConsolidatedReportDelivery?
+    suspend fun save(delivery: ConsolidatedReportDelivery)
+    fun observeRecent(limit: Int = 20): Flow<List<ConsolidatedReportDelivery>>
+    fun observeCounts(): Flow<ConsolidatedDeliveryCounts>
+    suspend fun withPendingAck(): List<ConsolidatedReportDelivery>
+    suspend fun deleteFinishedBefore(before: Long): Int
 }

@@ -18,6 +18,10 @@ data class DeviceRegistrationRequest(
     val osVersion: String,
     val manufacturer: String,
     val model: String,
+    /** WhatsApp group reports are captured from (null = not configured). Older backends ignore it. */
+    val sourceGroupName: String? = null,
+    /** WhatsApp group consolidated reports are shared to (null = not configured). */
+    val destinationGroupName: String? = null,
 )
 
 @Serializable
@@ -65,11 +69,20 @@ data class MessageUploadResponse(
     val resolvedServerId: String? get() = serverId ?: id
 }
 
+/** Body of `POST /api/v1/consolidated-reports/run-due`: keeps the backend's copy of this phone's groups current. */
+@Serializable
+data class ConsolidatedRunDueRequest(
+    val sourceGroupName: String? = null,
+    val destinationGroupName: String? = null,
+)
+
 /** `POST /api/v1/consolidated-reports/run-due`: deliveries the phone should offer to the operator. */
 @Serializable
 data class ConsolidatedRunDueResponse(
     val checkedAt: String? = null,
     val skipped: String? = null,
+    /** Configuration problem the backend reports, e.g. no destination group configured. */
+    val warning: String? = null,
     val deliveries: List<ConsolidatedDelivery> = emptyList(),
 )
 
@@ -81,6 +94,8 @@ data class ConsolidatedDelivery(
     val fileName: String,
     val caption: String,
     val destinationGroup: String? = null,
+    /** WhatsApp group(s) the included field reports came from. */
+    val sourceGroup: String? = null,
     val periodStart: String? = null,
     val periodEnd: String? = null,
     val reportCount: Int? = null,
@@ -90,8 +105,9 @@ data class ConsolidatedDelivery(
     val isTest: Boolean get() = kind == "test"
 }
 
+/** Delivery acknowledgement: notified | opened | sent | not_sent | failed (with [error]). */
 @Serializable
-data class ConsolidatedDeliveryAck(val state: String)
+data class ConsolidatedDeliveryAck(val state: String, val error: String? = null)
 
 @Serializable
 data class ConsolidatedDeliveryAckResponse(

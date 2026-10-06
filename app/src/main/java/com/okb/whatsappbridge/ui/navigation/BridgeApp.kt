@@ -54,6 +54,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.okb.whatsappbridge.AppContainer
 import com.okb.whatsappbridge.ui.StatusViewModel
+import com.okb.whatsappbridge.ui.consolidated.ShareReportActivity
 import com.okb.whatsappbridge.ui.dashboard.DashboardScreen
 import com.okb.whatsappbridge.ui.diagnostics.DiagnosticsScreen
 import com.okb.whatsappbridge.ui.diagnostics.LogsScreen
@@ -88,6 +89,7 @@ private const val ROUTE_RECYCLE_BIN = "recycle_bin"
 fun BridgeApp(container: AppContainer) {
     val navController = rememberNavController()
     val statusViewModel: StatusViewModel = viewModel(factory = viewModelFactory { initializer { StatusViewModel(container) } })
+    val context = androidx.compose.ui.platform.LocalContext.current
     val state by statusViewModel.state.collectAsStateWithLifecycle()
     val busy by statusViewModel.busy.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -206,6 +208,11 @@ fun BridgeApp(container: AppContainer) {
                         onOpenSettings = { navigateTop(TopLevel.SETTINGS) },
                         onOpenDiagnostics = { navController.navigate(ROUTE_DIAGNOSTICS) },
                         onReconnectListener = statusViewModel::reconnectListener,
+                        busy = busy,
+                        onCheckReports = statusViewModel::checkReportsNow,
+                        onSendReport = { id -> context.startActivity(ShareReportActivity.intent(context, id)) },
+                        onConfirmReportSent = statusViewModel::confirmReportSent,
+                        onReportNotSent = statusViewModel::markReportNotSent,
                     )
                 }
                 composable(TopLevel.MESSAGES.route) {
@@ -274,6 +281,7 @@ fun BridgeApp(container: AppContainer) {
                         onToggleMonitoring = statusViewModel::setMonitoringEnabled,
                         onSaveBackend = statusViewModel::saveBackendConfig,
                         onSaveDeviceName = statusViewModel::saveDeviceName,
+                        onSaveReportGroups = statusViewModel::saveReportGroups,
                         onRegisterDevice = statusViewModel::registerDevice,
                         onTestBackend = statusViewModel::testBackend,
                         onSetSyncPaused = statusViewModel::setSyncPaused,

@@ -15,6 +15,8 @@ enum class IgnoreReason {
     NO_CONTENT,
     NOT_A_GROUP,
     GROUP_NOT_AUTHORIZED,
+    /** From the configured destination group (where consolidated reports are sent): never a field report. */
+    DESTINATION_GROUP,
 }
 
 sealed interface FilterDecision {
@@ -98,4 +100,38 @@ object GroupAllowlist {
     }
 
     private val WHITESPACE = Regex("\\s+")
+}
+
+/**
+ * The two WhatsApp report groups: the SOURCE group (field reports are captured from it) and the DESTINATION
+ * group (consolidated reports are shared to it). They have different purposes and are never interchangeable.
+ */
+object ReportGroups {
+    const val MAX_LENGTH = 100
+
+    /** Problem with the pair of names, or null when they can be saved. Blank values are allowed (not configured). */
+    fun validate(source: String, destination: String): String? {
+        val s = source.trim()
+        val d = destination.trim()
+        if (s.length > MAX_LENGTH || d.length > MAX_LENGTH) return "Group names can be at most $MAX_LENGTH characters."
+        if (s.isNotEmpty() && d.isNotEmpty() && GroupAllowlist.normalize(s) == GroupAllowlist.normalize(d)) {
+            return "The source and destination groups must be different groups."
+        }
+        return null
+    }
+
+    /** True when one of the notification's group-name candidates is the destination group. */
+    fun isDestination(candidates: List<String>, destination: String): Boolean =
+        destination.isNotBlank() && GroupAllowlist.match(candidates, listOf(destination)) != null
+
+    /**
+     * Names a notification may be captured from: only the source group when one is configured (using the
+     * allowlist's stored spelling when it matches, so message fingerprints stay stable), otherwise the
+     * operator's existing Groups allowlist.
+     */
+    fun captureNames(source: String, allowlist: List<String>): List<String> {
+        if (source.isBlank()) return allowlist
+        val wanted = GroupAllowlist.normalize(source)
+        return listOf(allowlist.firstOrNull { GroupAllowlist.normalize(it) == wanted } ?: source.trim())
+    }
 }

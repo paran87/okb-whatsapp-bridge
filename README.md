@@ -877,25 +877,65 @@ height, coordinates, report time) stay `null`, with `".010 m"` left un-normalize
 > Do not claim these passed until executed on the physical device.
 ## Consolidated WhatsApp reports (one-tap send)
 
-The OKB backend can consolidate the flood reports it received into one PDF per reporting period (schedule
-and destination group are set in the OKB Command Center). The bridge takes part in two ways, using only
-what it already has:
+### WhatsApp Report Groups (Settings)
 
-- **Periodic check.** The existing 15-minute background check (`ReconciliationWorker`) also calls
-  `POST /api/v1/consolidated-reports/run-due`. The backend decides whether a report is due; the phone never
-  decides. A report that is waiting is downloaded into the app sandbox (`files/consolidated/`, removed after
-  7 days).
-- **One-tap send.** The phone shows a "Consolidated flood report ready to send" notification ("TEST REPORT
-  ready to send" for a test). Tapping it opens WhatsApp's **share screen** with the PDF attached and the
-  short caption filled in (the caption is also copied to the clipboard). **Select the destination group
-  configured in the Command Center and press Send.**
+Two separate settings with different purposes, stored separately (`source_group_name`,
+`destination_group_name` in the existing settings store) and sent to the backend with device registration
+and every 15-minute check:
 
-**Limitation.** WhatsApp offers no supported way for another app to open a specific group chat with an
-attachment, so the bridge does not select the group: the operator does, in WhatsApp's share screen. The
-bridge never sends anything by itself and does not use Accessibility automation or unofficial WhatsApp
-libraries. Android also cannot tell whether Send was pressed, so the bridge only reports that the share
-screen was **opened**; the Command Center shows "Opened in WhatsApp" and never claims a report was sent.
-Notifications must be allowed for the bridge; if they are blocked, the report stays "ready to send".
+| Setting | Purpose |
+|---|---|
+| **Source Group** (e.g. *NMDEO FLOOD MONITORING*) | WhatsApp group where flood/activity reports are received. Only this group is captured. |
+| **Destination Group** (e.g. *OKB COMMAND CENTER*) | WhatsApp group where consolidated reports will be sent. **Never captured** as a report. |
+
+- With no Source Group set, the groups authorized on the Groups tab are captured (previous behaviour).
+- The Destination Group is excluded from capture even if it is on the Groups allowlist.
+- The two names must be different (case and extra spaces are ignored).
+
+### Delivery (backend → phone → WhatsApp)
+
+The backend generates the consolidated PDF. The existing 15-minute background check (`ReconciliationWorker`)
+asks `POST /api/v1/consolidated-reports/run-due`; the backend decides whether a report is due and lists the
+reports waiting for **this** phone. Each report is tracked locally (Room table `consolidated_report_deliveries`):
+
+```
+READY_TO_SEND → DOWNLOADING → READY_FOR_WHATSAPP → OPENED_IN_WHATSAPP → SENT (operator confirms)
+                                     ↑_____________ "Not sent" ____________|      FAILED (download failed)
+```
+
+- The PDF is downloaded into the app sandbox, checked to be a complete PDF (`%PDF-` … `%%EOF`) and shared
+  only through the FileProvider. A report id is downloaded and offered once; acknowledgements made while
+  offline are retried on the next check. Five failed downloads (or a 404) mark it FAILED.
+- The Dashboard shows **Consolidated Report Ready** (source, destination, file name, status) with **Send to
+  WhatsApp**, and a notification does the same. **Check now** asks the backend immediately.
+
+### Sending to the destination group (requires the operator)
+
+Tapping **Send to WhatsApp** opens WhatsApp's **share screen** with the PDF attached and the short caption
+filled in (the caption is also copied to the clipboard). **Select the Destination Group and press Send.**
+Back in the app, answer **Yes, sent** or **Not sent**.
+
+**Limitation.** Android's standard sharing (ACTION_SEND) cannot select a WhatsApp group or press Send, and
+WhatsApp does not tell other apps whether a message was sent. So the bridge never sends anything by itself,
+never marks a report SENT because WhatsApp opened, and records SENT only when the operator confirms it.
+No Accessibility automation or unofficial WhatsApp library is used. The share step is isolated in
+`WhatsAppShare.launch` (`ui/consolidated/ShareReportActivity.kt`), so a future automation would replace
+only that step, not the queue.
+
+### Logs
+
+All bridge logs use the Logcat tag **`OKBBridge`** (`[Capture]`, `[Delivery]`, `[Groups]`, …). Tokens and
+keys are never logged (Redactor).
+
+### End-to-end test
+
+`integration/ConsolidatedFlowE2ETest` drives the real Room database, capture pipeline, upload, delivery queue
+and HTTP client against a running backend (`okb-bridge-cloud-backend/scripts/e2e-local-server.js`). It is
+skipped unless `OKB_E2E_BACKEND_URL` is set:
+
+```
+OKB_E2E_BACKEND_URL=http://127.0.0.1:8091 ./gradlew testDebugUnitTest --tests '*ConsolidatedFlowE2ETest' --rerun
+```
 
 ## Known limitations
 

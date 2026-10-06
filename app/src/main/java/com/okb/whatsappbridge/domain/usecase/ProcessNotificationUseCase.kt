@@ -17,6 +17,7 @@ import com.okb.whatsappbridge.whatsapp.GroupAllowlist
 import com.okb.whatsappbridge.whatsapp.IgnoreReason
 import com.okb.whatsappbridge.whatsapp.NotificationSnapshot
 import com.okb.whatsappbridge.whatsapp.ParsedMessage
+import com.okb.whatsappbridge.whatsapp.ReportGroups
 import com.okb.whatsappbridge.whatsapp.WhatsAppNotificationFilter
 import com.okb.whatsappbridge.whatsapp.WhatsAppNotificationParser
 
@@ -33,7 +34,8 @@ sealed interface ProcessingOutcome {
 /**
  * The capture pipeline executed for every posted notification, entirely in the background:
  *
- * monitoring enabled? → supported app (WhatsApp / Viber)? → system notification? → parse → authorized group?
+ * monitoring enabled? → supported app (WhatsApp / Viber)? → system notification? → parse
+ * → destination group? (never captured) → source group (or, when none is configured, the Groups allowlist)?
  * → fingerprint → save message to Room → (Phase 2) create+acquire linked media → schedule uploads.
  *
  * The pipeline is the same for every [SourcePlatform]; the platform only selects its ignore rules and
@@ -71,7 +73,12 @@ class ProcessNotificationUseCase(
         val parsed = parser.parse(snapshot)
         if (parsed.conversationType == ConversationType.PRIVATE) return ProcessingOutcome.Ignored(IgnoreReason.NOT_A_GROUP)
 
-        val authorizedGroup = GroupAllowlist.match(parsed.groupNameCandidates, groups.authorizedGroupNames())
+        // The destination group receives the consolidated reports; its messages are never field reports.
+        if (ReportGroups.isDestination(parsed.groupNameCandidates, current.destinationGroupName)) {
+            return ProcessingOutcome.Ignored(IgnoreReason.DESTINATION_GROUP)
+        }
+        val captureNames = ReportGroups.captureNames(current.sourceGroupName, groups.authorizedGroupNames())
+        val authorizedGroup = GroupAllowlist.match(parsed.groupNameCandidates, captureNames)
         if (authorizedGroup == null) {
             if (parsed.conversationType == ConversationType.GROUP) parsed.groupName?.let { groups.recordSeen(it, now) }
             return ProcessingOutcome.Ignored(IgnoreReason.GROUP_NOT_AUTHORIZED)

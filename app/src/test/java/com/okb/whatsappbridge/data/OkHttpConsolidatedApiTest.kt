@@ -3,6 +3,7 @@ package com.okb.whatsappbridge.data
 import com.okb.whatsappbridge.data.remote.api.ApiResult
 import com.okb.whatsappbridge.data.remote.api.BackendConfig
 import com.okb.whatsappbridge.data.remote.api.OkHttpBridgeApi
+import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueRequest
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -38,11 +39,15 @@ class OkHttpConsolidatedApiTest {
     @Test
     fun `run-due posts with the device token and parses deliveries`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody(
-            """{"checkedAt":"2026-08-12T04:05:00Z","generated":{"id":"x"},"skipped":null,"deliveries":[{"id":"5f0c6a2e-1b7d","kind":"test","fileName":"a.pdf","caption":"c","destinationGroup":"NCR Flood Monitoring","pdfPath":"api/v1/consolidated-reports/5f0c6a2e-1b7d/pdf","reportCount":2}]}""",
+            """{"checkedAt":"2026-08-12T04:05:00Z","generated":{"id":"x"},"skipped":null,"deliveries":[{"id":"5f0c6a2e-1b7d","kind":"test","fileName":"a.pdf","caption":"c","destinationGroup":"OKB COMMAND CENTER","sourceGroup":"NMDEO FLOOD MONITORING","pdfPath":"api/v1/consolidated-reports/5f0c6a2e-1b7d/pdf","reportCount":2}]}""",
         ))
-        val result = api.consolidatedRunDue(config())
+        val result = api.consolidatedRunDue(config(), ConsolidatedRunDueRequest("NMDEO FLOOD MONITORING", "OKB COMMAND CENTER"))
         val request = server.takeRequest()
         assertEquals("POST", request.method)
+        assertEquals(
+            """{"sourceGroupName":"NMDEO FLOOD MONITORING","destinationGroupName":"OKB COMMAND CENTER"}""",
+            request.body.readUtf8(),
+        )
         assertEquals("/api/v1/consolidated-reports/run-due", request.path)
         assertEquals("Bearer tok-123", request.getHeader("Authorization"))
         val deliveries = (result as ApiResult.Success).value.deliveries
@@ -74,7 +79,7 @@ class OkHttpConsolidatedApiTest {
         val r = api.acknowledgeConsolidatedDelivery(config(), "abc", "notified")
         val request = server.takeRequest()
         assertEquals("/api/v1/consolidated-reports/abc/delivery", request.path)
-        assertEquals("""{"state":"notified"}""", request.body.readUtf8())
+        assertEquals("""{"state":"notified","error":null}""", request.body.readUtf8())
         assertEquals("notified", (r as ApiResult.Success).value.whatsappStatus)
     }
 }

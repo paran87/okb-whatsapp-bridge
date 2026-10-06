@@ -65,6 +65,8 @@ class FakeSettingsRepository(initial: BridgeSettings = BridgeSettings()) : Setti
     override suspend fun recordMediaCapture(at: Long) = update { it.copy(lastMediaCaptureAt = at) }
     override suspend fun recordMediaUploadSuccess(at: Long) = update { it.copy(lastMediaUploadAt = at) }
     override suspend fun recordMediaFailure(at: Long, error: String) = update { it.copy(lastMediaError = error) }
+    override suspend fun setSourceGroupName(name: String) = update { it.copy(sourceGroupName = name.trim()) }
+    override suspend fun setDestinationGroupName(name: String) = update { it.copy(destinationGroupName = name.trim()) }
 }
 
 class FakeGroupRepository(vararg authorized: String) : GroupRepository {
@@ -159,4 +161,18 @@ class FakeAlerts : HealthAlertSink {
     var cleared = 0
     override fun monitoringMayBeInactive(state: MonitoringState) { raised += state }
     override fun clear() { cleared++ }
+}
+
+class FakeConsolidatedDeliveryRepository : com.okb.whatsappbridge.domain.repository.ConsolidatedDeliveryRepository {
+    val rows = linkedMapOf<String, com.okb.whatsappbridge.domain.model.ConsolidatedReportDelivery>()
+    private val flow = MutableStateFlow<List<com.okb.whatsappbridge.domain.model.ConsolidatedReportDelivery>>(emptyList())
+    override suspend fun get(id: String) = rows[id]
+    override suspend fun save(delivery: com.okb.whatsappbridge.domain.model.ConsolidatedReportDelivery) {
+        rows[delivery.id] = delivery
+        flow.value = rows.values.toList()
+    }
+    override fun observeRecent(limit: Int) = flow
+    override fun observeCounts() = MutableStateFlow(com.okb.whatsappbridge.domain.model.ConsolidatedDeliveryCounts())
+    override suspend fun withPendingAck() = rows.values.filter { it.pendingAck != null }
+    override suspend fun deleteFinishedBefore(before: Long) = 0
 }

@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import com.okb.whatsappbridge.data.local.dao.ConsolidatedDeliveryDao
 import com.okb.whatsappbridge.data.local.dao.EventLogDao
 import com.okb.whatsappbridge.data.local.dao.GroupDao
 import com.okb.whatsappbridge.data.local.dao.MediaDao
@@ -12,6 +13,7 @@ import com.okb.whatsappbridge.data.local.dao.SettingsDao
 import com.okb.whatsappbridge.data.local.dao.UploadQueueDao
 import com.okb.whatsappbridge.data.local.entity.BridgeEventLogEntity
 import com.okb.whatsappbridge.data.local.entity.BridgeSettingsEntity
+import com.okb.whatsappbridge.data.local.entity.ConsolidatedDeliveryEntity
 import com.okb.whatsappbridge.data.local.entity.MediaAttachmentEntity
 import com.okb.whatsappbridge.data.local.entity.MediaUploadQueueEntity
 import com.okb.whatsappbridge.data.local.entity.MonitoredGroupEntity
@@ -34,8 +36,9 @@ import com.okb.whatsappbridge.data.local.entity.WhatsAppMessageEntity
         BridgeEventLogEntity::class,
         MediaAttachmentEntity::class,
         MediaUploadQueueEntity::class,
+        ConsolidatedDeliveryEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class BridgeDatabase : RoomDatabase() {
@@ -45,6 +48,7 @@ abstract class BridgeDatabase : RoomDatabase() {
     abstract fun settingsDao(): SettingsDao
     abstract fun eventLogDao(): EventLogDao
     abstract fun mediaDao(): MediaDao
+    abstract fun consolidatedDeliveryDao(): ConsolidatedDeliveryDao
 
     companion object {
         const val NAME = "okb_bridge.db"

@@ -32,11 +32,12 @@ class RoomBridgeLogger(
         val safe = Redactor.redact(
             if (throwable != null) "$message (${throwable.javaClass.simpleName}: ${throwable.message})" else message,
         )
-        val logTag = "OKB/$tag".take(23)
+        // One Logcat tag for the whole bridge (filter: tag:OKBBridge); the area is kept in the message.
+        val line = "[$tag] $safe"
         when (level) {
-            "ERROR" -> Log.e(logTag, safe)
-            "WARN" -> Log.w(logTag, safe)
-            else -> Log.i(logTag, safe)
+            "ERROR" -> Log.e(LOGCAT_TAG, line)
+            "WARN" -> Log.w(LOGCAT_TAG, line)
+            else -> Log.i(LOGCAT_TAG, line)
         }
         scope.launch {
             runCatching {
@@ -47,6 +48,7 @@ class RoomBridgeLogger(
     }
 
     companion object {
+        const val LOGCAT_TAG = "OKBBridge"
         const val KEEP_ENTRIES = 1000
         private const val PRUNE_EVERY = 100L
     }

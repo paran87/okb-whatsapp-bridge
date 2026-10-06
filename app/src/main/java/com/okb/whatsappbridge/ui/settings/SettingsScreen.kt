@@ -53,6 +53,7 @@ fun SettingsScreen(
     onToggleMonitoring: (Boolean) -> Unit,
     onSaveBackend: (url: String, token: String?) -> Unit,
     onSaveDeviceName: (String) -> Unit,
+    onSaveReportGroups: (source: String, destination: String) -> Unit = { _, _ -> },
     onRegisterDevice: () -> Unit,
     onTestBackend: () -> Unit,
     onSetSyncPaused: (Boolean) -> Unit,
@@ -69,10 +70,14 @@ fun SettingsScreen(
     var url by rememberSaveable { mutableStateOf("") }
     var token by rememberSaveable { mutableStateOf("") }
     var deviceName by rememberSaveable { mutableStateOf("") }
+    var sourceGroup by rememberSaveable { mutableStateOf("") }
+    var destinationGroup by rememberSaveable { mutableStateOf("") }
     var initialized by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(state.loaded) {
         if (state.loaded && !initialized) {
             url = settings.backendUrl
+            sourceGroup = settings.sourceGroupName
+            destinationGroup = settings.destinationGroupName
             deviceName = settings.deviceName.ifBlank { system?.let { "${it.manufacturer} ${it.model}" }.orEmpty() }
             initialized = true
         }
@@ -93,6 +98,18 @@ fun SettingsScreen(
                 lastUploadAt = settings.lastUploadSuccessAt,
                 lastFailureAt = settings.lastUploadFailureAt,
                 onToggle = onToggleMonitoring,
+                modifier = narrow,
+            )
+        }
+
+        item {
+            ReportGroupsPanel(
+                source = sourceGroup,
+                destination = destinationGroup,
+                onSourceChange = { sourceGroup = it },
+                onDestinationChange = { destinationGroup = it },
+                onSave = { onSaveReportGroups(sourceGroup, destinationGroup) },
+                busy = busy,
                 modifier = narrow,
             )
         }

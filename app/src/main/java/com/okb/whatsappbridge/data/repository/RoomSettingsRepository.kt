@@ -50,6 +50,8 @@ class RoomSettingsRepository(
     override suspend fun recordMediaCapture(at: Long) = put(SettingKeys.LAST_MEDIA_CAPTURE_AT, at.toString())
     override suspend fun recordMediaUploadSuccess(at: Long) = put(SettingKeys.LAST_MEDIA_UPLOAD_AT, at.toString())
     override suspend fun recordMediaFailure(at: Long, error: String) = put(SettingKeys.LAST_MEDIA_ERROR, error.take(300))
+    override suspend fun setSourceGroupName(name: String) = put(SettingKeys.SOURCE_GROUP_NAME, name.trim())
+    override suspend fun setDestinationGroupName(name: String) = put(SettingKeys.DESTINATION_GROUP_NAME, name.trim())
 
     private suspend fun put(key: String, value: String?) = dao.put(BridgeSettingsEntity(key, value, clock()))
 
@@ -85,6 +87,8 @@ class RoomSettingsRepository(
             lastMediaCaptureAt = long(SettingKeys.LAST_MEDIA_CAPTURE_AT),
             lastMediaUploadAt = long(SettingKeys.LAST_MEDIA_UPLOAD_AT),
             lastMediaError = map[SettingKeys.LAST_MEDIA_ERROR],
+            sourceGroupName = map[SettingKeys.SOURCE_GROUP_NAME].orEmpty(),
+            destinationGroupName = map[SettingKeys.DESTINATION_GROUP_NAME].orEmpty(),
         )
     }
 }

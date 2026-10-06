@@ -52,6 +52,8 @@ class BackendUseCases(
             osVersion = deviceInfo.osVersion,
             manufacturer = deviceInfo.manufacturer,
             model = deviceInfo.model,
+            sourceGroupName = current.sourceGroupName.ifBlank { null },
+            destinationGroupName = current.destinationGroupName.ifBlank { null },
         )
         val result = when (val r = api.registerDevice(config(current.backendUrl), request)) {
             is ApiResult.Success -> {

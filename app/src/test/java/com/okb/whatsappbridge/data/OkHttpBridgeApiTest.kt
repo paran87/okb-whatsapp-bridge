@@ -92,6 +92,21 @@ class OkHttpBridgeApiTest {
     }
 
     @Test
+    fun `device registration carries the source and destination groups as separate fields`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"registered":true}"""))
+        api.registerDevice(
+            config(),
+            DeviceRegistrationRequest(
+                "OKB-ANDROID-A82F19", "Ops phone", "android", "1.1.0", "Android 14", "Xiaomi", "2209116AG",
+                sourceGroupName = "NMDEO FLOOD MONITORING", destinationGroupName = "OKB COMMAND CENTER",
+            ),
+        )
+        val body = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+        assertEquals("NMDEO FLOOD MONITORING", body["sourceGroupName"]!!.jsonPrimitive.content)
+        assertEquals("OKB COMMAND CENTER", body["destinationGroupName"]!!.jsonPrimitive.content)
+    }
+
+    @Test
     fun `no authorization header without a token`() = runTest {
         server.enqueue(MockResponse().setBody("{}"))
         api.health(config(token = null))

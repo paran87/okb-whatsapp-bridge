@@ -7,6 +7,7 @@ import androidx.work.WorkManager
 import com.okb.whatsappbridge.data.local.database.BridgeDatabase
 import com.okb.whatsappbridge.data.remote.api.OkHttpBridgeApi
 import com.okb.whatsappbridge.data.remote.api.OkHttpMediaUploader
+import com.okb.whatsappbridge.data.repository.RoomConsolidatedDeliveryRepository
 import com.okb.whatsappbridge.data.repository.RoomGroupRepository
 import com.okb.whatsappbridge.data.repository.RoomLogRepository
 import com.okb.whatsappbridge.data.repository.RoomMediaRepository
@@ -96,9 +97,11 @@ class AppContainer(private val app: Application) {
     val listenerRecovery by lazy { ListenerRecoveryUseCase(systemStatus, logger) }
     // Consolidated WhatsApp reports: PDFs downloaded for the one-tap share live in the app sandbox.
     val consolidatedReportDirectory: File by lazy { File(app.filesDir, "consolidated") }
+    val consolidatedDeliveries by lazy { RoomConsolidatedDeliveryRepository(database.consolidatedDeliveryDao()) }
     val consolidatedReports by lazy {
         ConsolidatedReportCheckUseCase(
-            settingsRepository, identity, api, consolidatedReportDirectory, AndroidConsolidatedReportNotifier(app), logger,
+            settingsRepository, identity, api, consolidatedDeliveries, consolidatedReportDirectory,
+            AndroidConsolidatedReportNotifier(app), logger,
         )
     }
     val healthCheck by lazy {

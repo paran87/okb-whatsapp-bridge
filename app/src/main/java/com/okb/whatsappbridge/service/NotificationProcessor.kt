@@ -32,13 +32,15 @@ class NotificationProcessor(
                     when (val outcome = useCase(snapshot)) {
                         is ProcessingOutcome.Captured -> if (outcome.inserted > 0) {
                             val media = if (outcome.mediaDetected > 0) " (${outcome.mediaDetected} media)" else ""
-                            logger.info(TAG, "Captured ${outcome.inserted} new message(s) from \"${outcome.groupName}\"$media")
+                            logger.info(TAG, "Source group matched: captured ${outcome.inserted} new message(s) from \"${outcome.groupName}\"$media")
                         }
                         // Log why an authorized-group notification was NOT captured, to aid diagnosis.
                         is ProcessingOutcome.Ignored -> when (outcome.reason) {
                             IgnoreReason.NO_CONTENT, IgnoreReason.NOT_A_GROUP,
                             IgnoreReason.GROUP_NOT_AUTHORIZED, IgnoreReason.GROUP_SUMMARY ->
                                 logger.info(TAG, "Ignored notification: ${outcome.reason.name}")
+                            IgnoreReason.DESTINATION_GROUP ->
+                                logger.info(TAG, "Ignored notification from the destination group (not a field report)")
                             else -> Unit
                         }
                     }
