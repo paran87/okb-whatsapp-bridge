@@ -64,9 +64,12 @@ fun ReportGroupsStatusPanel(
             settings.lastBackendCheckMessage, settings.lastUploadSuccessAt, settings.lastUploadFailureAt,
         )
         StatusLine("Backend", backend.level, backend.label)
-        KeyValueLine(
-            "PDFs (manual)",
+        // Label above the counts: side by side, the long counts line squeezed the label on phones.
+        Text("PDFs (manual)", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+        Text(
             "Pending ${counts.pending} · Ready ${counts.ready} · Sent ${counts.sent} · Failed ${counts.failed}",
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(bottom = 2.dp),
         )
         ButtonRow {
             OutlinedButton(onClick = onOpenSettings) { Text("Groups") }
