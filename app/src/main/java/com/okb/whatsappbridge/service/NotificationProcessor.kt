@@ -34,14 +34,13 @@ class NotificationProcessor(
                             val media = if (outcome.mediaDetected > 0) " (${outcome.mediaDetected} media)" else ""
                             logger.info(TAG, "Source group matched: captured ${outcome.inserted} new message(s) from \"${outcome.groupName}\"$media")
                         }
-                        // Log why an authorized-group notification was NOT captured, to aid diagnosis.
+                        // Log why a WhatsApp/Viber notification was NOT captured (chat name and reason, never the
+                        // message text), so a group that is never captured can be diagnosed from View Logs.
                         is ProcessingOutcome.Ignored -> when (outcome.reason) {
-                            IgnoreReason.NO_CONTENT, IgnoreReason.NOT_A_GROUP,
-                            IgnoreReason.GROUP_NOT_AUTHORIZED, IgnoreReason.GROUP_SUMMARY ->
-                                logger.info(TAG, "Ignored notification: ${outcome.reason.name}")
+                            IgnoreReason.UNSUPPORTED_APP, IgnoreReason.ONGOING -> Unit
                             IgnoreReason.DESTINATION_GROUP ->
                                 logger.info(TAG, "Ignored notification from the destination group (not a field report)")
-                            else -> Unit
+                            else -> logger.info(TAG, "Not captured (${outcome.reason.name}): ${describe(snapshot)}")
                         }
                     }
                 } catch (e: Exception) {
@@ -53,5 +52,11 @@ class NotificationProcessor(
 
     private companion object {
         const val TAG = "Capture"
+    }
+
+    private fun describe(s: NotificationSnapshot): String {
+        val chat = s.conversationTitle?.takeIf { it.isNotBlank() } ?: s.title?.takeIf { it.isNotBlank() } ?: "?"
+        val group = when (s.isGroupConversation) { true -> "group"; false -> "not marked as group"; null -> "group flag missing" }
+        return "chat \"$chat\" ($group, ${s.messages.size} message(s), category ${s.category ?: "none"}, channel ${s.channelId ?: "none"})"
     }
 }
