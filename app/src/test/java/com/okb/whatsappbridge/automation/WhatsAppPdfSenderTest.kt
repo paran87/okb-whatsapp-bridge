@@ -177,4 +177,19 @@ class WhatsAppPdfSenderTest {
         assertTrue(events.isEmpty())
         assertEquals(0, wa.sendPresses)
     }
+
+    @Test
+    fun `the PDF goes with its caption`() = runTest {
+        val wa = whatsApp()
+        assertTrue(sender(wa).send(wa.pkg, request(), progress) is SendOutcome.Sent)
+        assertEquals("📄 OKB CONSOLIDATED FLOOD MONITORING REPORT", wa.documentCaptions[fileName])
+    }
+
+    @Test
+    fun `a WhatsApp that drops the shared caption - the caption box is filled before Send`() = runTest {
+        val wa = whatsApp().apply { captionFromShare = false }
+        assertTrue(sender(wa).send(wa.pkg, request(), progress) is SendOutcome.Sent)
+        assertEquals("📄 OKB CONSOLIDATED FLOOD MONITORING REPORT", wa.documentCaptions[fileName])
+        assertEquals(listOf(fileName), wa.documentsIn(destination))
+    }
 }

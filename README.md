@@ -1003,6 +1003,10 @@ READY_TO_SEND → DOWNLOADING → READY_FOR_WHATSAPP → SENT (sent automaticall
   are touched on the screen instead, and the selection is checked before going on) → press WhatsApp's Send, plus the preview's
   Send or the "Send to …?" dialog, whichever this WhatsApp version shows → check the chat that opens is that
   group and the file name is in it → home screen, screen off again → `sent` to the backend.
+- **Caption and text report.** The PDF goes with its caption (title, reporting period, "attached"); when
+  WhatsApp drops the caption handed over with the share, the bridge types it into WhatsApp's caption box. A
+  schedule entry sent as PDF also has the consolidated text report, sent right after the PDF (also when the
+  PDF itself needs the operator), with the TEXT report's own status, retries and duplicate protection.
 - **Never twice.** "Send pressed" is saved before every press. If an attempt pressed Send but could not
   confirm the result, the next attempt does not share the PDF again: it opens the chat and looks for the file
   name. Found → SENT; not found → left to the operator.

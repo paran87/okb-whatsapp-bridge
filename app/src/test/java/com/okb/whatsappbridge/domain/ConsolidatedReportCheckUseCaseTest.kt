@@ -149,7 +149,8 @@ class ConsolidatedReportCheckUseCaseTest {
     @Test
     fun `the TEXT report is sent automatically before the PDF is downloaded, and the next cut-off alarm is set`() = runTest {
         val api = Api(listOf(remote)).apply {
-            textJobs = listOf(textJob)
+            // A text report of another entry (sent as TEXT): time-critical, before any PDF work.
+            textJobs = listOf(textJob.copy(reportId = "7a1b2c3d-0000-4000-8000-000000000009"))
             nextCutoffAt = "2026-10-06T22:00:00Z"
         }
         val result = useCase(api)()
@@ -502,5 +503,45 @@ class ConsolidatedReportCheckUseCaseTest {
         uc()
         assertEquals(1, sender.requests.size)
         assertEquals(ConsolidatedDeliveryStatus.READY_FOR_WHATSAPP, repo.get(remote.id)!!.status)
+    }
+
+    @Test
+    fun `an entry sent as PDF - the PDF goes first with its caption, then its text report`() = runTest {
+        val api = Api(listOf(remote)).apply { textJobs = listOf(textJob) } // the same report: PDF + text
+        val sender = object : AutomaticPdfSender {
+            override fun unavailableReason(): String? = null
+            override suspend fun send(request: PdfSendRequest, progress: PdfSendProgress): SendOutcome {
+                api.order += "pdf sent"
+                assertEquals(remote.caption, request.caption)
+                return SendOutcome.Sent("visible")
+            }
+        }
+        val uc = ConsolidatedReportCheckUseCase(
+            settings, SecureDeviceIdentityRepository(InMemorySecretStore()), api, repo, tmp.root,
+            { d, _ -> notified += d.id; true }, RecordingLogger(),
+            textDelivery = TextDeliveryUseCase(api, FakeTextDeliveryRepository(), textSender, RecordingLogger()),
+            pdfSender = sender,
+        )
+        val result = uc()
+        assertEquals(listOf("pdf", "pdf sent", "text"), api.order)
+        assertEquals(1, result.pdfSent)
+        assertEquals(1, result.textSent)
+        assertEquals(listOf("OKB COMMAND CENTER"), textSender.sent)
+    }
+
+    @Test
+    fun `an entry sent as PDF whose PDF needs the operator - its text report is still sent`() = runTest {
+        val api = Api(listOf(remote)).apply { textJobs = listOf(textJob) }
+        val sender = PdfSender().apply { outcomes += SendOutcome.Failed("WhatsApp did not come to the foreground") }
+        val uc = ConsolidatedReportCheckUseCase(
+            settings, SecureDeviceIdentityRepository(InMemorySecretStore()), api, repo, tmp.root,
+            { d, _ -> notified += d.id; true }, RecordingLogger(),
+            textDelivery = TextDeliveryUseCase(api, FakeTextDeliveryRepository(), textSender, RecordingLogger()),
+            pdfSender = sender,
+        )
+        val result = uc()
+        assertEquals(0, result.pdfSent)
+        assertEquals(1, result.textSent)
+        assertEquals(listOf(remote.id), notified)
     }
 }

@@ -8,6 +8,7 @@ import com.okb.whatsappbridge.data.remote.api.BackendConfig
 import com.okb.whatsappbridge.data.remote.api.BridgeApi
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedDelivery
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueRequest
+import com.okb.whatsappbridge.data.remote.dto.TextDeliveryJob
 import com.okb.whatsappbridge.domain.model.ConsolidatedDeliveryStatus
 import com.okb.whatsappbridge.domain.model.ConsolidatedDeliveryStatus.DOWNLOADING
 import com.okb.whatsappbridge.domain.model.ConsolidatedDeliveryStatus.FAILED
@@ -132,12 +133,11 @@ class ConsolidatedReportCheckUseCase(
         }
         response.warning?.let { logger.warn(TAG, "Backend: $it") }
 
-        // TEXT first: automatic and time-critical. PDFs wait for the operator anyway.
-        val text = if (textDelivery != null && response.textDeliveries.isNotEmpty()) {
-            textDelivery.process(config, response.textDeliveries, current.sourceGroupName)
-        } else {
-            TextDeliveryRunResult()
-        }
+        // TEXT first: automatic and time-critical. The text report of an entry sent as PDF goes right after its
+        // PDF (the PDF with its caption, then the text), also when the PDF itself needs the operator.
+        val pdfReports = response.deliveries.map { it.id }.toSet()
+        val (afterPdf, textFirst) = response.textDeliveries.partition { it.reportId in pdfReports }
+        val text = sendTexts(config, textFirst, current.sourceGroupName)
         // Cards of reports not offered now (cancelled, expired, waiting for a retry) show the backend's state.
         textDelivery?.syncWithBackend(config, response.textDeliveries.map { it.id }.toSet())
 
@@ -146,11 +146,18 @@ class ConsolidatedReportCheckUseCase(
             if (process(config, remote)) newlyReady++
         }
         val pdfSent = autoSendPdfs(config, current.destinationGroupName, current.sourceGroupName)
+        val textAfterPdf = sendTexts(config, afterPdf, current.sourceGroupName)
         housekeeping()
         val retryAt = listOfNotNull(epochMillis(response.nextRetryAt), nextAutoRetryAt()).minOrNull()
         wakeScheduler?.scheduleNext(epochMillis(response.nextCutoffAt), retryAt)
-        return ConsolidatedCheckResult(newlyReady, response.warning, textSent = text.sent, textFailed = text.failed, pdfSent = pdfSent)
+        return ConsolidatedCheckResult(
+            newlyReady, response.warning,
+            textSent = text.sent + textAfterPdf.sent, textFailed = text.failed + textAfterPdf.failed, pdfSent = pdfSent,
+        )
     }
+
+    private suspend fun sendTexts(config: BackendConfig, jobs: List<TextDeliveryJob>, sourceGroup: String): TextDeliveryRunResult =
+        if (textDelivery != null && jobs.isNotEmpty()) textDelivery.process(config, jobs, sourceGroup) else TextDeliveryRunResult()
 
     // ---- automatic PDF sending ------------------------------------------------------------------------------
 

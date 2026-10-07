@@ -111,7 +111,7 @@ class ConsolidatedFlowE2ETest {
     private fun historyRow(base: String, type: String): JsonObject =
         Json.parseToJsonElement(call("GET", "$base/api/v1/consolidated-reports", admin = true)).jsonObject["reports"]!!.jsonArray
             .map { it.jsonObject }
-            .single { it[if (type == "TEXT") "textDelivery" else "pdfDelivery"] is JsonObject }
+            .single { if (type == "TEXT") it["pdfDelivery"] !is JsonObject && it["textDelivery"] is JsonObject else it["pdfDelivery"] is JsonObject }
 
     private fun JsonObject.delivery(type: String): String = this[if (type == "TEXT") "textDelivery" else "pdfDelivery"]!!.jsonObject["status"]!!.jsonPrimitive.content
 
@@ -201,19 +201,23 @@ class ConsolidatedFlowE2ETest {
         )
         val first = check()
         assertEquals(null, first.error)
-        assertEquals(1, first.textSent)
+        assertEquals(2, first.textSent) // the TEXT entry's text, and the text report that goes with the PDF entry
         assertEquals(1, first.newlyReady)
 
         // TEXT: in the destination group exactly once, nothing in the source group, SENT on the backend.
         val sentTexts = whatsApp.messagesIn(destination)
-        assertEquals(1, sentTexts.size)
-        assertTrue(sentTexts.single().startsWith("📋 OKB CONSOLIDATED FLOOD MONITORING REPORT"))
-        assertTrue(sentTexts.single().contains("1) MM1DEO"))
-        assertTrue(sentTexts.single().contains("Ref: OKB-"))
+        assertEquals(2, sentTexts.size)
+        for (t in sentTexts) {
+            assertTrue(t.startsWith("📋 OKB CONSOLIDATED FLOOD MONITORING REPORT"))
+            assertTrue(t.contains("1) MM1DEO"))
+            assertTrue(t.contains("Ref: OKB-"))
+        }
+        assertEquals(2, sentTexts.map { Regex("Ref: (OKB-[0-9A-F]+)").find(it)!!.groupValues[1] }.toSet().size)
         assertTrue(whatsApp.messagesIn(source).isEmpty())
-        File("build/e2e").apply { mkdirs() }.let { File(it, "consolidated-e2e.txt").writeText(sentTexts.single()) }
+        File("build/e2e").apply { mkdirs() }.let { File(it, "consolidated-e2e.txt").writeText(sentTexts.first()) }
         assertEquals("sent", historyRow(base, "TEXT").delivery("TEXT"))
-        assertEquals(com.okb.whatsappbridge.domain.model.TextDeliveryStatus.SENT, textDeliveries.observeRecent().first().single().status)
+        assertTrue(textDeliveries.observeRecent().first().all { it.status == com.okb.whatsappbridge.domain.model.TextDeliveryStatus.SENT })
+        assertEquals("sent", historyRow(base, "PDF").delivery("TEXT"))
 
         // TEST 5: downloaded, verified PDF, ready to send, with both groups.
         val ready = deliveries.observeRecent().first().single()
@@ -233,8 +237,8 @@ class ConsolidatedFlowE2ETest {
         assertEquals(0, check().newlyReady)
         assertEquals(0, check().textSent)
         assertEquals(listOf(ready.id), notified)
-        assertEquals(1, whatsApp.messagesIn(destination).size)
-        assertEquals(1, whatsApp.sendPresses)
+        assertEquals(2, whatsApp.messagesIn(destination).size)
+        assertEquals(2, whatsApp.sendPresses)
 
         // TEST 8: share screen opened then cancelled → not sent; then opened again and confirmed → sent.
         check.markOpened(ready.id)
@@ -256,7 +260,7 @@ class ConsolidatedFlowE2ETest {
         assertEquals(destination, row["destinationGroup"]!!.jsonPrimitive.content)
         assertEquals(source, row["sourceGroup"]!!.jsonPrimitive.content)
         assertTrue(row["pdfDelivery"] !is JsonObject)
-        assertTrue(historyRow(base, "PDF")["textDelivery"] !is JsonObject)
+        assertEquals("sent", historyRow(base, "PDF").delivery("TEXT")) // its text report went with it
     }
 
     @Test
@@ -277,14 +281,24 @@ class ConsolidatedFlowE2ETest {
                 return WhatsAppPdfSender(whatsApp, sleep = { virtualTime += it }, clock = { virtualTime }).send(whatsApp.pkg, request, progress)
             }
         }
+        val textSender = object : AutomaticTextSender {
+            override fun unavailableReason(): String? = null
+            override suspend fun send(request: TextSendRequest, progress: SendProgress) =
+                WhatsAppTextSender(whatsApp, sleep = { virtualTime += it }, clock = { virtualTime }).send(whatsApp.pkg, request, progress)
+        }
         val check = ConsolidatedReportCheckUseCase(
             phone.bridge.settings, phone.bridge.identity, phone.api, deliveries, dir, { d, _ -> notified += d.id; true }, phone.bridge.logger,
+            textDelivery = TextDeliveryUseCase(phone.api, RoomTextDeliveryRepository(phone.bridge.db.textDeliveryDao()), textSender, phone.bridge.logger),
             pdfSender = pdfSender,
         )
         val first = check()
         assertEquals(null, first.error)
         assertEquals(1, first.newlyReady)
         assertEquals(0, first.pdfSent)
+        // The text report goes even though the PDF needs another try.
+        assertEquals(1, first.textSent)
+        assertEquals(1, whatsApp.messagesIn(destination).count { it.startsWith("📋 OKB CONSOLIDATED FLOOD MONITORING REPORT") })
+        assertEquals("sent", historyRow(phone.base, "PDF").delivery("TEXT"))
         val id = deliveries.observeRecent().first().single().id
         // The operator is told why and can send it by hand; the Command Center shows the same reason.
         assertEquals(listOf(id), notified)
@@ -299,12 +313,19 @@ class ConsolidatedFlowE2ETest {
         assertTrue(row.sentAutomatically)
         assertEquals(listOf(row.fileName), whatsApp.documentsIn(destination))
         assertTrue(whatsApp.documentsIn(source).isEmpty())
+        // The PDF carries its caption (period and "attached").
+        val caption = whatsApp.documentCaptions[row.fileName]!!
+        assertTrue(caption.contains("OKB CONSOLIDATED FLOOD MONITORING REPORT"))
+        assertTrue(caption.contains("Reporting Period:"))
         val sent = historyRow(phone.base, "PDF")["pdfDelivery"]!!.jsonObject
         assertEquals("sent", sent["status"]!!.jsonPrimitive.content)
         assertTrue(sent["errorMessage"] !is kotlinx.serialization.json.JsonPrimitive || sent["errorMessage"]!!.jsonPrimitive.contentOrNull == null)
 
         // Never twice: later checks send nothing more.
-        assertEquals(0, check().pdfSent)
+        val later = check()
+        assertEquals(0, later.pdfSent)
+        assertEquals(0, later.textSent)
         assertEquals(1, whatsApp.documentsIn(destination).size)
+        assertEquals(1, whatsApp.messagesIn(destination).count { it.startsWith("📋 OKB CONSOLIDATED FLOOD MONITORING REPORT") })
     }
 }

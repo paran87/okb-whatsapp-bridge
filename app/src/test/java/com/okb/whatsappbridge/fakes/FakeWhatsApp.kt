@@ -77,6 +77,10 @@ class FakeWhatsApp(
     /** "Send to" rows accept an accessibility click but nothing happens; only a touch selects them. */
     var pickerClickDoesNothing = false
     var taps = 0
+    /** WhatsApp puts the caption handed over with the share in its caption box (false: the box starts empty). */
+    var captionFromShare = true
+    /** Caption each PDF was sent with, by file name. */
+    val documentCaptions = mutableMapOf<String, String>()
     var tapWorks = true
     private var tapTargets: List<Pair<ScreenRect, () -> Unit>> = emptyList()
     val shares = mutableListOf<String>()
@@ -130,7 +134,7 @@ class FakeWhatsApp(
         if (!shareWorks || packageName != pkg) return false
         shares += file.name
         sharedFile = file.name
-        sharedCaption = caption
+        sharedCaption = if (captionFromShare) caption else ""
         pickerQuery = null
         selected = null
         screen = Screen.PICKER
@@ -161,7 +165,8 @@ class FakeWhatsApp(
         Screen.PICKER -> pickerScreen()
         Screen.PREVIEW -> node("android.widget.FrameLayout", children = listOf(
             node("android.widget.TextView", id = "document_name", text = sharedFile),
-            node("android.widget.EditText", id = "caption", text = sharedCaption, editable = true, onSetText = { sharedCaption = it; true }),
+            node("android.widget.EditText", id = "caption", text = sharedCaption.ifEmpty { "Add a caption…" }, hint = sharedCaption.isEmpty(),
+                editable = true, onSetText = { sharedCaption = it; true }),
             node("android.widget.TextView", id = "recipients", text = selected),
             node("android.widget.ImageButton", id = "send", desc = "Send", onClick = { finalSend(); true }),
         ))
@@ -215,6 +220,7 @@ class FakeWhatsApp(
         if (finalSendIgnored) return
         val chat = selected ?: return
         history.getOrPut(chat) { mutableListOf() }.add(Message(sharedFile!!, newMessageStatus))
+        documentCaptions[sharedFile!!] = sharedCaption
         if (returnToCallerAfterSend) {
             screen = Screen.OTHER_APP
         } else {

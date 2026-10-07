@@ -70,7 +70,7 @@ class WhatsAppPdfSender(
 
         return try {
             openSendTo(packageName, request, destination)
-            pressThrough(chat, packageName, destination, request.fileName, progress)
+            pressThrough(chat, packageName, destination, request.fileName, request.caption, progress)
         } catch (e: Abort) {
             e.outcome
         }
@@ -124,6 +124,31 @@ class WhatsAppPdfSender(
         fail("\"$destination\" could not be selected in WhatsApp's \"Send to\" list")
     }
 
+    /**
+     * Puts the report caption in WhatsApp's caption box when this screen has one and it does not hold the
+     * caption yet (some WhatsApp versions ignore the caption handed over with the shared PDF). A box that cannot
+     * be filled does not stop the PDF.
+     */
+    private suspend fun fillCaption(caption: String) {
+        if (caption.isBlank()) return
+        val box = captionField(ui.root()) ?: return
+        val firstLine = caption.lineSequence().first { it.isNotBlank() }.trim()
+        if (!box.isShowingHint && box.text?.contains(firstLine) == true) return
+        if (box.setText(caption)) {
+            poll(timing.stepTimeoutMs) { captionField(ui.root())?.let { !it.isShowingHint && it.text?.contains(firstLine) == true } == true }
+            log("Caption added to the PDF")
+        } else {
+            log("The caption could not be added; the PDF is sent without it")
+        }
+    }
+
+    /** WhatsApp's caption box: by id, else (on the preview, no search field) the only editable field. */
+    private fun captionField(root: UiNode?): UiNode? {
+        UiTree.byId(root, *CAPTION_IDS).firstOrNull { it.isEditable }?.let { return it }
+        if (searchField(root) != null || pickerRows(root).isNotEmpty()) return null
+        return UiTree.walk(root).filter { it.isEditable && UiTree.idName(it) !in WhatsAppTextSender.SEARCH_FIELD_IDS }.singleOrNull()
+    }
+
     /** WhatsApp reacted to the selection: a Send button on the list, or the next screen. */
     private fun selectionShown(): Boolean {
         val root = ui.root() ?: return false
@@ -171,6 +196,7 @@ class WhatsAppPdfSender(
         pkg: String,
         destination: String,
         fileName: String,
+        caption: String,
         progress: PdfSendProgress,
     ): SendOutcome {
         var presses = 0
@@ -200,6 +226,7 @@ class WhatsAppPdfSender(
             }
             if (presses >= MAX_PRESSES) fail("WhatsApp kept asking to confirm; the PDF may not have been sent (the next attempt checks the chat)")
             val before = current
+            if (current == Screen.PICKER || current == Screen.PREVIEW) fillCaption(caption)
             progress.beforePressSend()
             if (!press(button!!)) {
                 if (presses == 0) progress.sendNotRegistered()
@@ -322,6 +349,7 @@ class WhatsAppPdfSender(
         /** The positive button of an Android dialog ("Send", "OK"). */
         const val DIALOG_OK = "android:id/button1"
         const val MAX_PRESSES = 4
+        val CAPTION_IDS = arrayOf("caption", "media_caption", "caption_text", "caption_edit_text")
         const val LEFT_SETTLE_MS = 1_500L
         /** How long WhatsApp gets to show a selection before the row is touched instead. */
         const val SELECT_WAIT_MS = 3_000L
