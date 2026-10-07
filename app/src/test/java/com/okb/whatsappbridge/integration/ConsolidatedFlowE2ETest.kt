@@ -129,8 +129,12 @@ class ConsolidatedFlowE2ETest {
         assertEquals(source, device["sourceGroupName"]!!.jsonPrimitive.content)
         assertEquals(destination, device["destinationGroupName"]!!.jsonPrimitive.content)
 
-        // Command Center: enable consolidated reports every 15 minutes, destination left to the phone.
-        call("PUT", "$base/api/v1/consolidated-reports/settings", """{"settings":{"enabled":true,"scheduleTimes":[],"intervalMinutes":15,"destinationGroup":""}}""", admin = true)
+        // Command Center: enable consolidated reports (destination set on the phone) and schedule one: monitoring
+        // period from a minute ago to 15 minutes from now, sent at its end.
+        call("PUT", "$base/api/v1/consolidated-reports/settings", """{"settings":{"enabled":true}}""", admin = true)
+        val start = java.time.Instant.now().minusSeconds(60).truncatedTo(java.time.temporal.ChronoUnit.SECONDS)
+        val end = start.plusSeconds(16 * 60)
+        call("POST", "$base/api/v1/consolidated-reports/schedules", """{"periodStart":"$start","periodEnd":"$end","sendAt":"$end"}""", admin = true)
         Thread.sleep(1_100) // message times are whole seconds: the report must come after the moment it was enabled
 
         // TEST 1-3: capture only from the source group.
@@ -151,7 +155,7 @@ class ConsolidatedFlowE2ETest {
         }
         assertTrue("report processed by the AI pipeline (was '$reportStatus')", reportStatus == "extracted" || reportStatus == "needs_review")
 
-        // TEST 4: the next 15-minute cut-off passes → the phone's periodic check makes the backend generate the PDF.
+        // TEST 4: the sending time passes → the phone's periodic check makes the backend prepare the report.
         call("POST", "$controlUrl/offset?minutes=16")
         val dir = File(context.filesDir, "consolidated-e2e").apply { deleteRecursively() }
         val deliveries = RoomConsolidatedDeliveryRepository(bridge.db.consolidatedDeliveryDao())
