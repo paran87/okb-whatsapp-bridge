@@ -214,6 +214,7 @@ fun BridgeApp(container: AppContainer) {
                         onConfirmReportSent = statusViewModel::confirmReportSent,
                         onReportNotSent = statusViewModel::markReportNotSent,
                         onRemoveTextReport = statusViewModel::removeTextReport,
+                        onRemoveReport = statusViewModel::removeReport,
                     )
                 }
                 composable(TopLevel.MESSAGES.route) {

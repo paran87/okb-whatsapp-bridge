@@ -159,6 +159,7 @@ interface ConsolidatedDeliveryRepository {
     fun observeRecent(limit: Int = 20): Flow<List<ConsolidatedReportDelivery>>
     fun observeCounts(): Flow<ConsolidatedDeliveryCounts>
     suspend fun withPendingAck(): List<ConsolidatedReportDelivery>
+    suspend fun delete(id: String)
     suspend fun deleteFinishedBefore(before: Long): Int
 }
 

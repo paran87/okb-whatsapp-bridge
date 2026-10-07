@@ -358,6 +358,14 @@ class StatusViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** Dashboard "Remove" on a PDF card: deleted from this phone, reported to the backend as not sent from here. */
+    fun removeReport(id: String) {
+        viewModelScope.launch {
+            container.consolidatedReports.remove(id)
+            _events.emit("PDF removed from this phone")
+        }
+    }
+
     fun markReportNotSent(id: String) {
         viewModelScope.launch {
             container.consolidatedReports.markNotSent(id)

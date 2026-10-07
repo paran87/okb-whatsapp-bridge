@@ -49,6 +49,7 @@ fun DashboardScreen(
     onConfirmReportSent: (String) -> Unit = {},
     onReportNotSent: (String) -> Unit = {},
     onRemoveTextReport: (String) -> Unit = {},
+    onRemoveReport: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val settings = state.settings
@@ -111,6 +112,7 @@ fun DashboardScreen(
                     onConfirmSent = { onConfirmReportSent(delivery.id) },
                     onNotSent = { onReportNotSent(delivery.id) },
                     onRetry = onCheckReports,
+                    onRemove = { onRemoveReport(delivery.id) },
                 )
             }
         }

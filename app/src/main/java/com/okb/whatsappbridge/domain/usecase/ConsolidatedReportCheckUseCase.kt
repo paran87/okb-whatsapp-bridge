@@ -229,6 +229,23 @@ class ConsolidatedReportCheckUseCase(
     /** The operator cancelled or did not send it: it stays ready to send. */
     suspend fun markNotSent(id: String) = transition(id, READY_FOR_WHATSAPP, STATE_NOT_SENT) { it.copy(openedAt = null) }
 
+    /**
+     * Dashboard "Remove": the card and its PDF are deleted from this phone, and the backend is told it will not
+     * be sent from here (PDF "failed: Removed on the bridge phone", so it is not offered again; a Resend from
+     * the Command Center brings it back). Works for any status, also when the report was deleted there.
+     */
+    suspend fun remove(id: String) {
+        val delivery = deliveries.get(id) ?: return
+        pdfFile(directory, delivery.id, delivery.fileName)?.parentFile?.deleteRecursively()
+        deliveries.delete(id)
+        logger.info(TAG, "Removed from the phone: ${delivery.fileName}")
+        if (delivery.status == SENT) return // already final on the backend
+        val current = settings.current()
+        if (current.backendConfigured) {
+            api.acknowledgeConsolidatedDelivery(config(current.backendUrl), id, STATE_FAILED, REMOVED_ON_PHONE)
+        }
+    }
+
     /** The share screen could not be opened (e.g. no app can share PDFs). The report stays ready; nothing is reported as sent. */
     suspend fun recordShareProblem(id: String, problem: String) {
         val delivery = deliveries.get(id) ?: return
@@ -252,7 +269,10 @@ class ConsolidatedReportCheckUseCase(
 
     /** Reports a delivery state to the backend; while offline it is kept and retried on the next check. */
     private suspend fun ack(config: BackendConfig, id: String, state: String, error: String? = null) {
-        val ok = api.acknowledgeConsolidatedDelivery(config, id, state, error) is ApiResult.Success
+        val r = api.acknowledgeConsolidatedDelivery(config, id, state, error)
+        // 403/404: the report is gone from the backend (deleted in the Command Center) or belongs to another
+        // phone; retrying would never succeed, so the acknowledgement is dropped.
+        val ok = r is ApiResult.Success || (r is ApiResult.HttpError && (r.httpCode == 403 || r.httpCode == 404))
         val delivery = deliveries.get(id) ?: return
         if (ok) {
             if (delivery.pendingAck != null) deliveries.save(delivery.copy(pendingAck = null, pendingAckError = null))
@@ -303,6 +323,7 @@ class ConsolidatedReportCheckUseCase(
         const val STATE_SENT = "sent"
         const val STATE_NOT_SENT = "not_sent"
         const val STATE_FAILED = "failed"
+        const val REMOVED_ON_PHONE = "Removed on the bridge phone"
         const val MAX_DOWNLOAD_ATTEMPTS = 5
         private const val FILE_RETENTION_MILLIS = 7L * 24 * 60 * 60 * 1000
         private const val ROW_RETENTION_MILLIS = 30L * 24 * 60 * 60 * 1000

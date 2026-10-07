@@ -7,6 +7,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.okb.whatsappbridge.domain.model.BridgeSettings
@@ -15,6 +19,7 @@ import com.okb.whatsappbridge.domain.model.ConsolidatedDeliveryStatus
 import com.okb.whatsappbridge.domain.model.ConsolidatedReportDelivery
 import com.okb.whatsappbridge.ui.StatusPresentation
 import com.okb.whatsappbridge.ui.components.ButtonRow
+import com.okb.whatsappbridge.ui.components.ConfirmDialog
 import com.okb.whatsappbridge.ui.components.KeyValueLine
 import com.okb.whatsappbridge.ui.components.Panel
 import com.okb.whatsappbridge.ui.components.StatusLevel
@@ -90,7 +95,9 @@ fun ConsolidatedReportCard(
     onConfirmSent: () -> Unit,
     onNotSent: () -> Unit,
     onRetry: () -> Unit,
+    onRemove: () -> Unit = {},
 ) {
+    var confirmRemove by remember { mutableStateOf(false) }
     val destination = delivery.destinationGroup?.takeIf { it.isNotBlank() } ?: settings.destinationGroupName.ifBlank { null }
     val source = delivery.sourceGroup?.takeIf { it.isNotBlank() } ?: settings.sourceGroupName.ifBlank { null }
     val (level, label) = delivery.status.label()
@@ -130,6 +137,20 @@ fun ConsolidatedReportCard(
                 Hint("Ask the Command Center to Resend this report (Settings → Automated WhatsApp reports → History).")
             ConsolidatedDeliveryStatus.SENT -> Unit
         }
+        OutlinedButton(onClick = { confirmRemove = true }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Remove") }
+    }
+    if (confirmRemove) {
+        ConfirmDialog(
+            title = "Remove this PDF?",
+            text = "${delivery.fileName} is removed from this phone and will not be sent from here. " +
+                "The Command Center shows it as removed; Resend there brings it back.",
+            confirmLabel = "Remove",
+            onConfirm = {
+                confirmRemove = false
+                onRemove()
+            },
+            onDismiss = { confirmRemove = false },
+        )
     }
 }
 

@@ -24,6 +24,9 @@ interface ConsolidatedDeliveryDao {
     @Query("SELECT status, COUNT(*) AS count FROM consolidated_report_deliveries GROUP BY status")
     fun observeStatusCounts(): Flow<List<DeliveryStatusCount>>
 
+    @Query("DELETE FROM consolidated_report_deliveries WHERE id = :id")
+    suspend fun delete(id: String): Int
+
     @Query("DELETE FROM consolidated_report_deliveries WHERE status IN ('SENT', 'FAILED') AND updatedAt < :before")
     suspend fun deleteFinishedBefore(before: Long): Int
 }

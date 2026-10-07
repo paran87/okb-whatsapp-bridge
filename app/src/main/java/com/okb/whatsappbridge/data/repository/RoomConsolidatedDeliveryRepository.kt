@@ -31,6 +31,10 @@ class RoomConsolidatedDeliveryRepository(private val dao: ConsolidatedDeliveryDa
 
     override suspend fun withPendingAck(): List<ConsolidatedReportDelivery> = dao.withPendingAck().map { it.toDomain() }
 
+    override suspend fun delete(id: String) {
+        dao.delete(id)
+    }
+
     override suspend fun deleteFinishedBefore(before: Long): Int = dao.deleteFinishedBefore(before)
 }
 

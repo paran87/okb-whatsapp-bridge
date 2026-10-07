@@ -174,6 +174,10 @@ class FakeConsolidatedDeliveryRepository : com.okb.whatsappbridge.domain.reposit
     override fun observeRecent(limit: Int) = flow
     override fun observeCounts() = MutableStateFlow(com.okb.whatsappbridge.domain.model.ConsolidatedDeliveryCounts())
     override suspend fun withPendingAck() = rows.values.filter { it.pendingAck != null }
+    override suspend fun delete(id: String) {
+        rows.remove(id)
+        flow.value = rows.values.toList()
+    }
     override suspend fun deleteFinishedBefore(before: Long) = 0
 }
 

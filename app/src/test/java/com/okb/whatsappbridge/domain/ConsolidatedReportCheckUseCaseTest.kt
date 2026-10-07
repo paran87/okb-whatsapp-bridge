@@ -58,6 +58,9 @@ class ConsolidatedReportCheckUseCaseTest {
         val requests = mutableListOf<ConsolidatedRunDueRequest>()
         val downloads = mutableListOf<String>()
         val acks = mutableListOf<Pair<String, String>>()
+        val ackErrors = mutableListOf<String?>()
+        /** The report was deleted in the Command Center: acknowledgements answer 404. */
+        var reportDeleted = false
 
         override suspend fun consolidatedRunDue(config: BackendConfig, request: ConsolidatedRunDueRequest): ApiResult<ConsolidatedRunDueResponse> {
             if (!online) return ApiResult.NetworkError("UnknownHostException")
@@ -88,7 +91,9 @@ class ConsolidatedReportCheckUseCaseTest {
 
         override suspend fun acknowledgeConsolidatedDelivery(config: BackendConfig, id: String, state: String, error: String?): ApiResult<ConsolidatedDeliveryAckResponse> {
             if (!online || !ackOk) return ApiResult.NetworkError("offline")
+            if (reportDeleted) return ApiResult.HttpError(404, "consolidated report not found")
             acks += id to state
+            ackErrors += error
             return ApiResult.Success(ConsolidatedDeliveryAckResponse(id, state), 200)
         }
     }
@@ -309,5 +314,32 @@ class ConsolidatedReportCheckUseCaseTest {
             AndroidConsolidatedReportNotifier.shareInstruction("OKB COMMAND CENTER"),
         )
         assertTrue(AndroidConsolidatedReportNotifier.shareInstruction(" ").contains("No destination group is configured"))
+    }
+
+    @Test
+    fun `Remove deletes the card and its PDF and tells the backend it will not be sent from this phone`() = runTest {
+        val api = Api(listOf(remote))
+        val uc = useCase(api)
+        uc()
+        val file = ConsolidatedReportCheckUseCase.pdfFile(tmp.root, remote.id, remote.fileName)!!
+        assertTrue(file.exists())
+
+        uc.remove(remote.id)
+
+        assertNull(repo.get(remote.id))
+        assertFalse(file.exists())
+        assertEquals(remote.id to "failed", api.acks.last())
+        assertEquals("Removed on the bridge phone", api.ackErrors.last())
+    }
+
+    @Test
+    fun `a report deleted in the Command Center - its acknowledgement is dropped, not retried forever`() = runTest {
+        val api = Api(listOf(remote)).apply { reportDeleted = true }
+        val uc = useCase(api)
+        uc() // downloaded; the "notified" acknowledgement answers 404
+        assertNull(repo.get(remote.id)!!.pendingAck)
+        api.deliveries = emptyList()
+        uc.remove(remote.id) // still removable
+        assertNull(repo.get(remote.id))
     }
 }
