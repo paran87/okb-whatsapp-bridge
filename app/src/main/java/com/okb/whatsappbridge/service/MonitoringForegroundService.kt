@@ -22,9 +22,10 @@ import kotlinx.coroutines.launch
  * away from Recents) does not kill the notification listener — on many phones, Xiaomi/Redmi/POCO
  * especially, a process without a foreground service is killed as soon as its task is removed.
  *
- * It does no work of its own (no polling, no wake lock): it only holds a low-priority ongoing
- * notification and triggers listener recovery when (re)started. Capture still happens in
- * [WhatsAppNotificationListenerService]. It stops when monitoring is turned OFF.
+ * It holds a low-priority ongoing notification, triggers listener recovery when (re)started and runs the
+ * [com.okb.whatsappbridge.domain.usecase.ReportWatcher] (a small "is a report due?" request every ~30 s, no
+ * wake lock). Capture still happens in [WhatsAppNotificationListenerService]. It stops when monitoring is
+ * turned OFF.
  *
  * It cannot survive "Force stop": Android deliberately stops every component of a force-stopped app
  * until the user opens it again. When the app is opened, it reconnects automatically.
@@ -56,9 +57,16 @@ class MonitoringForegroundService : Service() {
                 return@launch
             }
             c.listenerRecovery("monitoring service started")
+            // Scheduled reports go out within seconds of their date of sending while monitoring is on.
+            c.reportWatcher.start(c.appScope)
         }
         // Restarted by Android if the process is killed while monitoring is on.
         return START_STICKY
+    }
+
+    override fun onDestroy() {
+        container().reportWatcher.stop()
+        super.onDestroy()
     }
 
     private fun container() = (application as OkbBridgeApplication).container

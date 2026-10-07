@@ -12,6 +12,7 @@ import com.okb.whatsappbridge.data.remote.dto.MediaCompleteResponse
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedDeliveryAckResponse
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueRequest
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueResponse
+import com.okb.whatsappbridge.data.remote.dto.ConsolidatedNextResponse
 import com.okb.whatsappbridge.data.remote.dto.TextClaimResponse
 import com.okb.whatsappbridge.data.remote.dto.TextDeliveryJob
 import com.okb.whatsappbridge.data.remote.dto.TextResultRequest
@@ -46,6 +47,10 @@ interface BridgeApi {
     suspend fun mediaComplete(config: BackendConfig, request: MediaCompleteRequest): ApiResult<MediaCompleteResponse>
 
     // Consolidated reports. Defaults keep other implementations (test fakes) source-compatible.
+    /** Quick read-only "is anything due?" question (polled by the report watcher). */
+    suspend fun consolidatedNext(config: BackendConfig): ApiResult<ConsolidatedNextResponse> =
+        ApiResult.ConfigurationError("Consolidated reports are not supported")
+
     suspend fun consolidatedRunDue(
         config: BackendConfig,
         request: ConsolidatedRunDueRequest = ConsolidatedRunDueRequest(),

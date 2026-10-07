@@ -94,6 +94,20 @@ data class ConsolidatedRunDueResponse(
     val nextRetryAt: String? = null,
 )
 
+/** `GET …/consolidated-reports/next`: the quick, read-only "is anything due?" answer (polled every ~30 s). */
+@Serializable
+data class ConsolidatedNextResponse(
+    val serverTime: String? = null,
+    /** A scheduled report's date of sending has come: run the full check now. */
+    val due: Boolean = false,
+    /** A TEXT report is waiting for this phone (not being sent, no retry pending). */
+    val textWaiting: Boolean = false,
+    /** A PDF is waiting to be downloaded to this phone. */
+    val pdfWaiting: Boolean = false,
+    val nextCutoffAt: String? = null,
+    val nextRetryAt: String? = null,
+)
+
 /** One part of a consolidated TEXT report: the WhatsApp message and the reference printed in it. */
 @Serializable
 data class TextMessagePart(val text: String, val ref: String)

@@ -10,9 +10,9 @@ import com.okb.whatsappbridge.service.ReportAlarmReceiver
 import com.okb.whatsappbridge.util.logging.BridgeLogger
 
 /**
- * Wakes the phone just after each scheduled cut-off (6:00 AM, 6:00 PM, 12:00 AM by default, as reported by the
- * backend) so the consolidated TEXT report goes out on time even in Doze, instead of whenever the 15-minute
- * periodic check is allowed to run. Uses an exact alarm when "Alarms & reminders" is allowed for the app, else
+ * Wakes the phone just after the next date of sending in the report schedule (as reported by the backend) so
+ * the consolidated report goes out on time even in Doze, instead of whenever the 15-minute periodic check is
+ * allowed to run. Uses an exact alarm when "Alarms & reminders" is allowed for the app, else
  * an inexact one (may be late by several minutes in Doze; the checklist asks the operator to allow it).
  */
 class AlarmReportWakeScheduler(
@@ -65,8 +65,8 @@ class AlarmReportWakeScheduler(
         private const val KEY_NEXT_AT = "next_at"
         private const val KEY_NEXT_EXACT = "next_exact"
         private const val REQUEST_CODE = 4100
-        /** Reports finish AI processing before the cut-off; one minute after it the backend can build the report. */
-        const val AFTER_CUTOFF_MS = 60_000L
+        /** Just after the date of sending (a few seconds of margin for clock differences with the backend). */
+        const val AFTER_CUTOFF_MS = 3_000L
         const val AFTER_RETRY_MS = 5_000L
         const val RETRY_AFTER_FAILURE_MS = 4L * 60_000
         const val MAX_RETRIES = 6

@@ -13,6 +13,7 @@ import com.okb.whatsappbridge.data.remote.dto.ConsolidatedDeliveryAck
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedDeliveryAckResponse
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueRequest
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueResponse
+import com.okb.whatsappbridge.data.remote.dto.ConsolidatedNextResponse
 import com.okb.whatsappbridge.data.remote.dto.TextClaimResponse
 import com.okb.whatsappbridge.data.remote.dto.TextDeliveryJob
 import com.okb.whatsappbridge.data.remote.dto.TextResultRequest
@@ -87,6 +88,14 @@ class OkHttpBridgeApi(
     )
 
     // The run-due call may wake a sleeping backend and render a PDF, so it gets a longer timeout.
+    override suspend fun consolidatedNext(config: BackendConfig): ApiResult<ConsolidatedNextResponse> = execute(
+        config,
+        "api/v1/consolidated-reports/next",
+        body = null,
+        ConsolidatedNextResponse.serializer(),
+        ConsolidatedNextResponse(),
+    )
+
     override suspend fun consolidatedRunDue(
         config: BackendConfig,
         request: ConsolidatedRunDueRequest,

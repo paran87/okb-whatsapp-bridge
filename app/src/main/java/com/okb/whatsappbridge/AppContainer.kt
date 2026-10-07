@@ -24,6 +24,7 @@ import com.okb.whatsappbridge.domain.usecase.HealthCheckUseCase
 import com.okb.whatsappbridge.domain.usecase.ListenerRecoveryUseCase
 import com.okb.whatsappbridge.domain.usecase.ProcessNotificationUseCase
 import com.okb.whatsappbridge.domain.usecase.RecycleBinUseCase
+import com.okb.whatsappbridge.domain.usecase.ReportWatcher
 import com.okb.whatsappbridge.domain.usecase.SyncMediaUseCase
 import com.okb.whatsappbridge.domain.usecase.SyncMessagesUseCase
 import com.okb.whatsappbridge.domain.usecase.TextDeliveryUseCase
@@ -115,6 +116,10 @@ class AppContainer(private val app: Application) {
             AndroidConsolidatedReportNotifier(app), logger,
             textDelivery = textDelivery, wakeScheduler = reportWakeScheduler,
         )
+    }
+    /** Polls the backend every ~30 s while monitoring is on, so scheduled reports go out within seconds. */
+    val reportWatcher by lazy {
+        ReportWatcher(settingsRepository, identity, api, reportWakeScheduler, { consolidatedReports() }, logger)
     }
     val healthCheck by lazy {
         HealthCheckUseCase(
