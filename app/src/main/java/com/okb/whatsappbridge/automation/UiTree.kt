@@ -19,6 +19,8 @@ interface UiNode {
      */
     val isShowingHint: Boolean get() = false
     val children: List<UiNode>
+    /** Where the element is on the screen (its visible part), or null when unknown. */
+    val bounds: ScreenRect? get() = null
     /** Re-reads the element from the app (Android otherwise may answer from a cached copy). */
     fun refresh(): Boolean = true
     val parent: UiNode?
@@ -43,6 +45,19 @@ interface WhatsAppUi {
      * task. False when it could not be started.
      */
     fun shareFile(packageName: String, file: java.io.File, caption: String): Boolean = false
+
+    /**
+     * Touches the screen at ([x], [y]) like a finger. For list rows that ignore an accessibility click (some
+     * WhatsApp lists only react to a real touch). True when Android performed the touch.
+     */
+    suspend fun tap(x: Int, y: Int): Boolean = false
+}
+
+/** A rectangle in screen pixels. */
+data class ScreenRect(val left: Int, val top: Int, val right: Int, val bottom: Int) {
+    val isEmpty: Boolean get() = right <= left || bottom <= top
+    val centerX: Int get() = (left + right) / 2
+    val centerY: Int get() = (top + bottom) / 2
 }
 
 /** Tree helpers. */

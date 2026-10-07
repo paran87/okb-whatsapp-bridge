@@ -1,5 +1,6 @@
 package com.okb.whatsappbridge.fakes
 
+import com.okb.whatsappbridge.automation.ScreenRect
 import com.okb.whatsappbridge.automation.UiNode
 import com.okb.whatsappbridge.automation.WhatsAppUi
 
@@ -71,6 +72,13 @@ class FakeWhatsApp(
     /** The final Send press (the one that sends the PDF) does nothing. */
     var finalSendIgnored = false
     var shareWorks = true
+    /** "Send to" rows refuse an accessibility click (not clickable); only a touch on the screen selects them. */
+    var pickerRowsTouchOnly = false
+    /** "Send to" rows accept an accessibility click but nothing happens; only a touch selects them. */
+    var pickerClickDoesNothing = false
+    var taps = 0
+    var tapWorks = true
+    private var tapTargets: List<Pair<ScreenRect, () -> Unit>> = emptyList()
     val shares = mutableListOf<String>()
     private var sharedFile: String? = null
     private var sharedCaption = ""
@@ -105,6 +113,15 @@ class FakeWhatsApp(
             Screen.CHAT, Screen.SEARCH -> Screen.HOME
             Screen.PICKER, Screen.PREVIEW, Screen.DIALOG -> Screen.OTHER_APP
             else -> screen
+        }
+        return true
+    }
+
+    override suspend fun tap(x: Int, y: Int): Boolean {
+        taps++
+        if (tapWorks && screen == Screen.PICKER) {
+            root() // the rows as currently shown
+            tapTargets.firstOrNull { (r, _) -> x in r.left until r.right && y in r.top until r.bottom }?.second?.invoke()
         }
         return true
     }
@@ -161,16 +178,26 @@ class FakeWhatsApp(
             query != null -> if (query.isBlank()) emptyList() else chatNames.filter { it.contains(query.trim(), ignoreCase = true) }
             else -> pickerVisibleChats ?: chatNames
         }
-        val rows = listed.map { name ->
-            node("android.widget.RelativeLayout", clickable = true, onClick = {
+        val targets = mutableListOf<Pair<ScreenRect, () -> Unit>>()
+        val rows = listed.mapIndexed { i, name ->
+            val choose = {
                 when (pickerMode) {
                     PickerMode.SELECT_THEN_SEND -> selected = name
                     PickerMode.DIALOG -> { selected = name; screen = Screen.DIALOG }
                     PickerMode.ROW_OPENS_PREVIEW -> { selected = name; screen = Screen.PREVIEW }
                 }
-                true
-            }, children = listOf(node("android.widget.TextView", id = "contactpicker_row_name", text = name)))
+            }
+            val area = ScreenRect(0, 300 + i * 120, 1080, 420 + i * 120)
+            targets += area to choose
+            val onClick: (() -> Boolean)? = when {
+                pickerRowsTouchOnly -> null
+                pickerClickDoesNothing -> ({ true })
+                else -> ({ choose(); true })
+            }
+            node("android.widget.RelativeLayout", onClick = onClick, bounds = area,
+                children = listOf(node("android.widget.TextView", id = "contactpicker_row_name", text = name, bounds = area)))
         }
+        tapTargets = targets
         return node("android.widget.FrameLayout", children = listOfNotNull(
             node("android.widget.TextView", id = "toolbar_title", text = "Send to…"),
             if (query == null) node("android.widget.ImageButton", id = "menuitem_search", desc = "Search", onClick = { pickerQuery = ""; true })
@@ -268,9 +295,10 @@ class FakeWhatsApp(
         onSetText: ((String) -> Boolean)? = null,
         onScrollBack: (() -> Boolean)? = null,
         onRefresh: (() -> Boolean)? = null,
+        bounds: ScreenRect? = null,
     ): FakeNode = FakeNode(
         className, id?.let { "$pkg:id/$it" }, text, desc, editable, clickable || onClick != null, children, onClick, onSetText, onScrollBack,
-        hint, onRefresh,
+        hint, onRefresh, bounds,
     ).also { n -> children.forEach { it.parentNode = n } }
 
     class FakeNode(
@@ -286,6 +314,7 @@ class FakeWhatsApp(
         private val onScrollBack: (() -> Boolean)?,
         override val isShowingHint: Boolean = false,
         private val onRefresh: (() -> Boolean)? = null,
+        override val bounds: ScreenRect? = null,
     ) : UiNode {
         var parentNode: UiNode? = null
         override val parent: UiNode? get() = parentNode

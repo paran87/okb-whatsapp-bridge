@@ -1,5 +1,6 @@
 package com.okb.whatsappbridge.automation
 
+import android.graphics.Rect
 import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
 
@@ -17,6 +18,9 @@ class AccessibilityUiNode(private val info: AccessibilityNodeInfo) : UiNode {
         get() = (0 until info.childCount).mapNotNull { info.getChild(it) }.map(::AccessibilityUiNode)
 
     override val parent: UiNode? get() = info.parent?.let(::AccessibilityUiNode)
+
+    override val bounds: ScreenRect?
+        get() = Rect().also(info::getBoundsInScreen).let { ScreenRect(it.left, it.top, it.right, it.bottom) }
 
     override fun click(): Boolean = info.performAction(AccessibilityNodeInfo.ACTION_CLICK)
 

@@ -103,12 +103,56 @@ class WhatsAppPdfSender(
         }
         val row = matchingRows(ui.root(), destination).firstOrNull() ?: searchFor(destination)
         log("Selecting \"$destination\" for the PDF")
-        if (!UiTree.click(row)) fail("\"$destination\" could not be selected in WhatsApp's \"Send to\" list")
+        select(row, destination)
+    }
+
+    /**
+     * Selects the destination row and waits until WhatsApp shows it is selected (its Send button, a preview or
+     * a "Send to …?" dialog). Some WhatsApp versions ignore an accessibility click on these rows, so the row
+     * is then touched on the screen like a finger would.
+     */
+    private suspend fun select(row: UiNode, destination: String) {
+        if (UiTree.click(row) && poll(SELECT_WAIT_MS) { selectionShown() }) return
+        // The click was refused or did nothing: touch the row (found again, it may have moved).
+        val target = matchingRows(ui.root(), destination).firstOrNull() ?: row
+        val area = touchArea(target)
+        if (area != null && ui.tap(area.centerX, area.centerY) && poll(SELECT_WAIT_MS) { selectionShown() }) {
+            log("\"$destination\" selected by touching the row")
+            return
+        }
+        log("Row not selectable: ${describe(target)}")
+        fail("\"$destination\" could not be selected in WhatsApp's \"Send to\" list")
+    }
+
+    /** WhatsApp reacted to the selection: a Send button on the list, or the next screen. */
+    private fun selectionShown(): Boolean {
+        val root = ui.root() ?: return false
+        return when (screen(root)) {
+            Screen.PICKER -> sendButton(root) != null
+            Screen.UNKNOWN -> false
+            else -> true
+        }
+    }
+
+    /** Presses [node]: an accessibility click, else a touch on it. */
+    private suspend fun press(node: UiNode): Boolean {
+        if (UiTree.click(node)) return true
+        val area = touchArea(node) ?: return false
+        return ui.tap(area.centerX, area.centerY)
+    }
+
+    /** The on-screen area of [node]'s row (its clickable ancestor, else itself), when visible. */
+    private fun touchArea(node: UiNode): ScreenRect? =
+        listOfNotNull(UiTree.clickTarget(node), node).firstNotNullOfOrNull { it.bounds?.takeIf { b -> !b.isEmpty } }
+
+    /** Shape of a row for the log (classes, ids and clickability up the tree; no message content). */
+    private fun describe(node: UiNode): String = generateSequence(node) { it.parent }.take(5).joinToString(" < ") {
+        "${it.className?.substringAfterLast('.')}${UiTree.idName(it)?.let { id -> "#$id" } ?: ""}${if (it.isClickable) "(clickable)" else ""}"
     }
 
     private suspend fun searchFor(destination: String): UiNode {
         val button = awaitNode("WhatsApp search was not found on the \"Send to\" screen") { searchButton(it) }
-        UiTree.click(button)
+        press(button)
         val field = awaitNode("WhatsApp search field was not found") { searchField(it) }
         if (!field.setText(destination)) fail("The group name could not be entered in WhatsApp search")
         return awaitNode(
@@ -157,7 +201,7 @@ class WhatsAppPdfSender(
             if (presses >= MAX_PRESSES) fail("WhatsApp kept asking to confirm; the PDF may not have been sent (the next attempt checks the chat)")
             val before = current
             progress.beforePressSend()
-            if (!UiTree.click(button!!)) {
+            if (!press(button!!)) {
                 if (presses == 0) progress.sendNotRegistered()
                 fail("The WhatsApp Send button could not be pressed")
             }
@@ -223,7 +267,8 @@ class WhatsAppPdfSender(
         if (entryField(root) != null) return emptyList()
         return UiTree.walk(root).filter { node ->
             !node.isEditable && UiTree.idName(node) !in WhatsAppTextSender.SEARCH_FIELD_IDS &&
-                node.text?.let { WhatsAppTextSender.same(it, destination) } == true && UiTree.clickTarget(node) != null
+                node.text?.let { WhatsAppTextSender.same(it, destination) } == true &&
+                (UiTree.clickTarget(node) != null || node.bounds?.isEmpty == false)
         }.toList()
     }
 
@@ -278,5 +323,7 @@ class WhatsAppPdfSender(
         const val DIALOG_OK = "android:id/button1"
         const val MAX_PRESSES = 4
         const val LEFT_SETTLE_MS = 1_500L
+        /** How long WhatsApp gets to show a selection before the row is touched instead. */
+        const val SELECT_WAIT_MS = 3_000L
     }
 }

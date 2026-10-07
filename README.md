@@ -999,7 +999,8 @@ READY_TO_SEND → DOWNLOADING → READY_FOR_WHATSAPP → SENT (sent automaticall
   retried on the next check. Five failed downloads (or a 404) mark it FAILED.
 - **Sent automatically** right after the download (`automation/WhatsAppPdfSender`): wake and unlock the
   screen as for the TEXT report → share the PDF to WhatsApp → on WhatsApp's "Send to" list select the row
-  named exactly like the DESTINATION group (else WhatsApp search) → press WhatsApp's Send, plus the preview's
+  named exactly like the DESTINATION group (else WhatsApp search; rows that ignore an accessibility click
+  are touched on the screen instead, and the selection is checked before going on) → press WhatsApp's Send, plus the preview's
   Send or the "Send to …?" dialog, whichever this WhatsApp version shows → check the chat that opens is that
   group and the file name is in it → home screen, screen off again → `sent` to the backend.
 - **Never twice.** "Send pressed" is saved before every press. If an attempt pressed Send but could not

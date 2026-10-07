@@ -140,4 +140,41 @@ class WhatsAppPdfSenderTest {
         val outcome = sender(wa).send(wa.pkg, request(), progress)
         assertEquals(SendOutcome.Failed("WhatsApp's \"Send to\" screen could not be opened"), outcome)
     }
+
+    @Test
+    fun `rows that ignore an accessibility click are selected by touching them`() = runTest {
+        val wa = whatsApp().apply { pickerRowsTouchOnly = true }
+        val outcome = sender(wa).send(wa.pkg, request(), progress)
+        assertEquals(SendOutcome.Sent("$fileName visible in \"$destination\" after Send"), outcome)
+        assertEquals(listOf(fileName), wa.documentsIn(destination))
+        assertTrue(wa.documentsIn(source).isEmpty())
+        assertEquals(1, wa.taps)
+    }
+
+    @Test
+    fun `a click that WhatsApp accepts but ignores falls back to a touch`() = runTest {
+        val wa = whatsApp().apply { pickerClickDoesNothing = true; pickerMode = PickerMode.DIALOG }
+        val outcome = sender(wa).send(wa.pkg, request(), progress)
+        assertTrue(outcome is SendOutcome.Sent)
+        assertEquals(listOf(fileName), wa.documentsIn(destination))
+        assertEquals(1, wa.taps)
+    }
+
+    @Test
+    fun `touch-only rows found with WhatsApp search`() = runTest {
+        val wa = whatsApp().apply { pickerRowsTouchOnly = true; pickerVisibleChats = listOf("Family") }
+        val outcome = sender(wa).send(wa.pkg, request(), progress)
+        assertTrue(outcome is SendOutcome.Sent)
+        assertEquals(listOf(fileName), wa.documentsIn(destination))
+        assertTrue(wa.documentsIn(source).isEmpty())
+    }
+
+    @Test
+    fun `a row that neither a click nor a touch selects fails before anything is pressed`() = runTest {
+        val wa = whatsApp().apply { pickerRowsTouchOnly = true; tapWorks = false }
+        val outcome = sender(wa).send(wa.pkg, request(), progress)
+        assertEquals(SendOutcome.Failed("\"$destination\" could not be selected in WhatsApp's \"Send to\" list"), outcome)
+        assertTrue(events.isEmpty())
+        assertEquals(0, wa.sendPresses)
+    }
 }

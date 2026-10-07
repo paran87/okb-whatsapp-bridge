@@ -117,7 +117,12 @@ class WhatsAppAutomationService : AccessibilityService(), WhatsAppUi {
         val gesture = GestureDescription.Builder()
             .addStroke(GestureDescription.StrokeDescription(path, 0, 300))
             .build()
-        return suspendCancellableCoroutine { cont ->
+        return perform(gesture)
+    }
+
+    /** Dispatches [gesture]; true when Android completed it. */
+    private suspend fun perform(gesture: GestureDescription): Boolean =
+        suspendCancellableCoroutine { cont ->
             val started = dispatchGesture(
                 gesture,
                 object : GestureResultCallback() {
@@ -133,12 +138,18 @@ class WhatsAppAutomationService : AccessibilityService(), WhatsAppUi {
             )
             if (!started && cont.isActive) cont.resume(false)
         }
+
+    override suspend fun tap(x: Int, y: Int): Boolean {
+        if (x < 0 || y < 0) return false
+        val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
+        return perform(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, TAP_MS)).build())
     }
 
     /** Turns the screen off again after an automatic send that woke the phone (Android 9+). */
     fun lockScreen(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
 
     companion object {
+        private const val TAP_MS = 60L
         private val connectedService = MutableStateFlow<WhatsAppAutomationService?>(null)
 
         /** The running service, or null when it is off (or Android has not bound it yet). */
