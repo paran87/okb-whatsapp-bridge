@@ -243,4 +243,33 @@ class TextDeliveryUseCaseTest {
         assertTrue(sender.requests.isEmpty())
         assertEquals(TextDeliveryStatus.SCHEDULED, repo.get(job.id)!!.status)
     }
+
+    @Test
+    fun `a press that did not register is forgotten, an unconfirmed press blocks re-sending until Retry from the Command Center`() = runTest {
+        val api = Api()
+        val notRegistered = Sender(outcome = { r, p ->
+            p.beforePressSend(r.parts[0].ref)
+            p.sendNotRegistered(r.parts[0].ref)
+            SendOutcome.Failed("Send was pressed but WhatsApp did not take the message", retryable = true)
+        })
+        useCase(api, notRegistered).process(config, listOf(job), null)
+        assertTrue(repo.get(job.id)!!.pressedRefs.isEmpty())
+
+        // Taken but unconfirmable: the press is remembered and passed on, so the sender will not press again.
+        api.status = "scheduled"
+        val unconfirmed = Sender(outcome = { r, p ->
+            p.beforePressSend(r.parts[0].ref)
+            SendOutcome.Failed("unconfirmed", retryable = false)
+        })
+        useCase(api, unconfirmed).process(config, listOf(job.copy(attempts = 1)), null)
+        assertEquals(setOf("OKB-9B2F6C1E"), repo.get(job.id)!!.pressedRefs)
+        assertEquals(TextDeliveryStatus.FAILED, repo.get(job.id)!!.status)
+
+        // Retry from the Command Center resets the backend attempt count to 0: earlier presses are cleared.
+        api.status = "scheduled"
+        val retried = Sender()
+        useCase(api, retried).process(config, listOf(job.copy(attempts = 0)), null)
+        assertTrue(retried.requests.single().pressedRefs.isEmpty())
+        assertEquals(TextDeliveryStatus.SENT, repo.get(job.id)!!.status)
+    }
 }

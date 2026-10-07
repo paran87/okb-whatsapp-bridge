@@ -15,6 +15,11 @@ data class TextSendRequest(
     val parts: List<MessagePart>,
     /** Parts already confirmed in the chat by an earlier attempt (never sent again). */
     val alreadySentRefs: Set<String> = emptySet(),
+    /**
+     * Parts whose Send button an earlier attempt pressed without confirming them. If such a part cannot be found in
+     * the chat it is NOT sent again (it may be there but unreadable): the attempt stops so nothing is duplicated.
+     */
+    val pressedRefs: Set<String> = emptySet(),
 )
 
 sealed interface SendOutcome {
@@ -29,6 +34,9 @@ sealed interface SendOutcome {
 interface SendProgress {
     suspend fun beforePressSend(ref: String)
     suspend fun partConfirmed(ref: String, verification: String)
+
+    /** The press did not register (the text is still in the message box): the part was not sent. */
+    suspend fun sendNotRegistered(ref: String) {}
 }
 
 /**
@@ -87,7 +95,7 @@ class WhatsAppTextSender(
             val confirmations = mutableListOf<String>()
             for (part in request.parts) {
                 if (part.ref in request.alreadySentRefs) continue
-                confirmations += sendPart(part, destination, progress)
+                confirmations += sendPart(part, destination, request, progress)
             }
             SendOutcome.Sent(confirmations.lastOrNull() ?: "already confirmed in \"$destination\" by an earlier attempt")
         } catch (e: Abort) {
@@ -148,7 +156,7 @@ class WhatsAppTextSender(
 
     // ---- one message ----------------------------------------------------------------------------------------
 
-    private suspend fun sendPart(part: MessagePart, destination: String, progress: SendProgress): String {
+    private suspend fun sendPart(part: MessagePart, destination: String, request: TextSendRequest, progress: SendProgress): String {
         // Never twice: an earlier attempt (interrupted, or offline) may already have put it in the chat.
         if (findInChat(part.ref, searchHistory = true) != null) {
             val verification = confirmStatus(part.ref, destination, alreadyThere = true)
@@ -156,26 +164,36 @@ class WhatsAppTextSender(
             log("Ref ${part.ref} already in the chat: not sent again")
             return verification
         }
+        if (part.ref in request.pressedRefs) fail(UNCONFIRMED_EARLIER, retryable = false)
 
         val entry = awaitNode("The WhatsApp message box was not found") { entryField(it) }
         if (!entry.setText(part.text)) fail("The report text could not be entered in WhatsApp")
-        val typed = poll(timing.stepTimeoutMs) { entryField(ui.root())?.text?.let { sameText(it, part.text) } == true }
+        val typed = poll(timing.stepTimeoutMs) { entryField(ui.root())?.let { box -> !box.isShowingHint && box.text?.let { sameText(it, part.text) } == true } == true }
         if (!typed) fail("WhatsApp did not accept the report text")
 
         val sendButton = awaitNode("The WhatsApp Send button was not found") { sendButton(it) }
         progress.beforePressSend(part.ref)
-        if (!UiTree.click(sendButton)) fail("The WhatsApp Send button could not be pressed")
+        if (!UiTree.click(sendButton)) {
+            progress.sendNotRegistered(part.ref)
+            fail("The WhatsApp Send button could not be pressed")
+        }
         log("Send pressed for Ref ${part.ref}")
 
-        val appeared = poll(timing.confirmTimeoutMs) {
-            val root = ui.root()
-            entryField(root)?.text.isNullOrBlank() && findInChat(part.ref, searchHistory = false, root = root) != null
+        // WhatsApp empties the message box when it takes the message.
+        val taken = poll(timing.confirmTimeoutMs) { entryField(ui.root())?.let(::isEmptyBox) ?: false }
+        if (!taken) {
+            progress.sendNotRegistered(part.ref)
+            fail("Send was pressed but WhatsApp did not take the message (it is still in the message box)")
         }
-        if (!appeared) fail("Send was pressed but the message did not appear in the chat")
+        val appeared = poll(timing.confirmTimeoutMs) { findInChat(part.ref, searchHistory = false) != null }
+        if (!appeared) fail(UNCONFIRMED_NOW, retryable = false)
         val verification = confirmStatus(part.ref, destination, alreadyThere = false)
         progress.partConfirmed(part.ref, verification)
         return verification
     }
+
+    /** Empty message box: no text, or only its placeholder ("Message"). */
+    private fun isEmptyBox(box: UiNode): Boolean = box.isShowingHint || box.text.isNullOrBlank()
 
     /** Waits for WhatsApp's tick status of the message. Pending → not sent (yet); unreadable → the visible message counts. */
     private suspend fun confirmStatus(ref: String, destination: String, alreadyThere: Boolean): String {
@@ -254,8 +272,10 @@ class WhatsAppTextSender(
         return null
     }
 
+    /** A message in the chat whose text (or, in some WhatsApp versions, description) contains [ref]. */
     private fun sentMessage(root: UiNode?, ref: String): UiNode? = UiTree.walk(root).firstOrNull { node ->
-        !node.isEditable && UiTree.idName(node) !in ENTRY_IDS && node.text?.contains(ref) == true
+        !node.isEditable && UiTree.idName(node) !in ENTRY_IDS &&
+            (node.text?.contains(ref) == true || node.contentDescription?.contains(ref) == true)
     }
 
     private fun chatRows(root: UiNode?): List<UiNode> = UiTree.byId(root, *CHAT_ROW_IDS)
@@ -319,6 +339,13 @@ class WhatsAppTextSender(
     private fun fail(reason: String, retryable: Boolean = true): Nothing = throw Abort(SendOutcome.Failed(reason, retryable))
 
     companion object {
+        const val UNCONFIRMED_NOW =
+            "Send was pressed and WhatsApp took the message, but it could not be found in the chat to confirm it. " +
+                "Check the group: it is most likely there. It is not sent again automatically (no duplicates); " +
+                "use Retry in the Command Center only if it is missing."
+        const val UNCONFIRMED_EARLIER =
+            "An earlier attempt pressed Send for this report but it cannot be found in the chat. It is not sent again " +
+                "automatically (no duplicates); check the group and use Retry in the Command Center only if it is missing."
         val CHAT_ROW_IDS = arrayOf("conversations_row_contact_name", "contact_row_name")
         val TITLE_IDS = arrayOf("conversation_contact_name", "conversation_title")
         val ENTRY_IDS = arrayOf("entry")

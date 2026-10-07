@@ -39,6 +39,12 @@ class FakeWhatsApp(
     /** Messages visible on one screen of a chat (older ones need scrolling back). */
     var visibleMessages = 5
     var showStatusIcons = true
+    /** Like Android: an empty message box reports its placeholder "Message" as text (isShowingHint = true). */
+    var emptyBoxShowsHint = true
+    /** How sent message bubbles expose their text: as text (normal), only as a description, or not at all. */
+    var messageText: MessageTextMode = MessageTextMode.TEXT
+
+    enum class MessageTextMode { TEXT, DESCRIPTION_ONLY, UNREADABLE }
 
     val typedTexts = mutableListOf<String>()
     var sendPresses = 0
@@ -117,7 +123,11 @@ class FakeWhatsApp(
             if (all.size - scrollBack > visibleMessages) { scrollBack = (scrollBack + visibleMessages).coerceAtMost(all.size); true } else false
         }, children = shown.map { m ->
             node("android.widget.LinearLayout", id = "main_layout", children = listOfNotNull(
-                node("android.widget.TextView", id = "message_text", text = m.text),
+                when (messageText) {
+                    MessageTextMode.TEXT -> node("android.widget.TextView", id = "message_text", text = m.text)
+                    MessageTextMode.DESCRIPTION_ONLY -> node("android.widget.TextView", id = "message_text", desc = m.text)
+                    MessageTextMode.UNREADABLE -> node("android.widget.TextView", id = "message_text")
+                },
                 node("android.widget.TextView", id = "date", text = "12:01 AM"),
                 if (showStatusIcons && m.status != null) node("android.widget.ImageView", id = "status", desc = m.status) else null,
             ))
@@ -125,7 +135,9 @@ class FakeWhatsApp(
         return node("android.widget.FrameLayout", children = listOf(
             node("android.widget.TextView", id = "conversation_contact_name", text = chat),
             list,
-            node("android.widget.EditText", id = "entry", text = drafts[chat].orEmpty(), editable = true, onSetText = {
+            node("android.widget.EditText", id = "entry",
+                text = drafts[chat].orEmpty().ifEmpty { if (emptyBoxShowsHint) "Message" else "" },
+                hint = emptyBoxShowsHint && drafts[chat].isNullOrEmpty(), editable = true, onSetText = {
                 drafts[chat] = it
                 typedTexts += it
                 true
@@ -150,12 +162,14 @@ class FakeWhatsApp(
         desc: String? = null,
         editable: Boolean = false,
         clickable: Boolean = false,
+        hint: Boolean = false,
         children: List<FakeNode> = emptyList(),
         onClick: (() -> Boolean)? = null,
         onSetText: ((String) -> Boolean)? = null,
         onScrollBack: (() -> Boolean)? = null,
     ): FakeNode = FakeNode(
         className, id?.let { "$pkg:id/$it" }, text, desc, editable, clickable || onClick != null, children, onClick, onSetText, onScrollBack,
+        hint,
     ).also { n -> children.forEach { it.parentNode = n } }
 
     class FakeNode(
@@ -169,6 +183,7 @@ class FakeWhatsApp(
         private val onClick: (() -> Boolean)?,
         private val onSetText: ((String) -> Boolean)?,
         private val onScrollBack: (() -> Boolean)?,
+        override val isShowingHint: Boolean = false,
     ) : UiNode {
         var parentNode: UiNode? = null
         override val parent: UiNode? get() = parentNode

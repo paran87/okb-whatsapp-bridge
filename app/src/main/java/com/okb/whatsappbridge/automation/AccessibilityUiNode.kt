@@ -11,6 +11,7 @@ class AccessibilityUiNode(private val info: AccessibilityNodeInfo) : UiNode {
     override val className: String? get() = info.className?.toString()
     override val isEditable: Boolean get() = info.isEditable
     override val isClickable: Boolean get() = info.isClickable
+    override val isShowingHint: Boolean get() = info.isShowingHintText
 
     override val children: List<UiNode>
         get() = (0 until info.childCount).mapNotNull { info.getChild(it) }.map(::AccessibilityUiNode)

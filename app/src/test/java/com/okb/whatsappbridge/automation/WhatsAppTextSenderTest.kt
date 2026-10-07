@@ -24,14 +24,15 @@ class WhatsAppTextSenderTest {
     private val progress = object : SendProgress {
         override suspend fun beforePressSend(ref: String) { events += "press $ref" }
         override suspend fun partConfirmed(ref: String, verification: String) { events += "confirmed $ref" }
+        override suspend fun sendNotRegistered(ref: String) { events += "not registered $ref" }
     }
 
     private fun whatsApp(vararg chats: String = arrayOf("Family", source, destination, "DPWH Staff")) = FakeWhatsApp(chats.toList())
 
     private fun sender(ui: WhatsAppUi) = WhatsAppTextSender(ui, sleep = { now += it }, clock = { now })
 
-    private fun request(parts: List<MessagePart> = listOf(part), sent: Set<String> = emptySet(), dest: String = destination) =
-        TextSendRequest("d1", dest, source, parts, sent)
+    private fun request(parts: List<MessagePart> = listOf(part), sent: Set<String> = emptySet(), dest: String = destination, pressed: Set<String> = emptySet()) =
+        TextSendRequest("d1", dest, source, parts, sent, pressed)
 
     @Test
     fun `sends the report into the destination group only and confirms it from the chat`() = runTest {
@@ -116,8 +117,10 @@ class WhatsAppTextSenderTest {
         val wa = whatsApp()
         wa.sendPressIgnored = true
         val first = sender(wa).send(wa.pkg, request(), progress) as SendOutcome.Failed
-        assertTrue(first.reason, first.reason.contains("did not appear"))
+        assertTrue(first.reason, first.reason.contains("did not take the message"))
+        assertTrue(first.retryable)
         assertTrue(wa.messagesIn(destination).isEmpty())
+        assertTrue(events.contains("not registered OKB-1A2B3C4D"))
 
         wa.sendPressIgnored = false
         assertTrue(sender(wa).send(wa.pkg, request(), progress) is SendOutcome.Sent)
@@ -193,6 +196,37 @@ class WhatsAppTextSenderTest {
         assertTrue(outcome.reason, outcome.reason.contains("Display pop-up windows while running in the background"))
         assertTrue(outcome.retryable)
         assertEquals(0, wa.sendPresses)
+    }
+
+    @Test
+    fun `an empty message box showing its placeholder counts as empty (the real-phone case)`() = runTest {
+        val wa = whatsApp() // emptyBoxShowsHint = true: after Send the box reads "Message"
+        assertTrue(sender(wa).send(wa.pkg, request(), progress) is SendOutcome.Sent)
+        assertEquals(listOf(report), wa.messagesIn(destination))
+    }
+
+    @Test
+    fun `message text exposed only as a description is still found`() = runTest {
+        val wa = whatsApp()
+        wa.messageText = FakeWhatsApp.MessageTextMode.DESCRIPTION_ONLY
+        assertTrue(sender(wa).send(wa.pkg, request(), progress) is SendOutcome.Sent)
+        assertEquals(1, wa.sendPresses)
+    }
+
+    @Test
+    fun `taken by WhatsApp but unreadable in the chat - stops without sending again on the next attempt`() = runTest {
+        val wa = whatsApp()
+        wa.messageText = FakeWhatsApp.MessageTextMode.UNREADABLE
+        val first = sender(wa).send(wa.pkg, request(), progress) as SendOutcome.Failed
+        assertEquals(WhatsAppTextSender.UNCONFIRMED_NOW, first.reason)
+        assertFalse(first.retryable)
+        assertEquals(1, wa.messagesIn(destination).size)
+
+        // The next attempt knows Send was pressed: it does not press again.
+        val second = sender(wa).send(wa.pkg, request(pressed = setOf(part.ref)), progress) as SendOutcome.Failed
+        assertEquals(WhatsAppTextSender.UNCONFIRMED_EARLIER, second.reason)
+        assertEquals(1, wa.sendPresses)
+        assertEquals(1, wa.messagesIn(destination).size)
     }
 
     /** WhatsApp whose chat list does not show [hidden]; only search finds it. */

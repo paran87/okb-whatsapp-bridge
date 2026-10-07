@@ -13,6 +13,11 @@ interface UiNode {
     val className: String?
     val isEditable: Boolean
     val isClickable: Boolean
+    /**
+     * True when an empty text field reports its placeholder ("Message") as its text, as Android does for
+     * accessibility. Such a field is empty.
+     */
+    val isShowingHint: Boolean get() = false
     val children: List<UiNode>
     val parent: UiNode?
     fun click(): Boolean

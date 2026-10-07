@@ -90,6 +90,12 @@ class TextDeliveryUseCase(
             logger.info(TAG, "Text report received: ${describe(created)} → \"${created.destinationGroup}\"")
             created
         }
+        // A Retry from the Command Center restarts the attempt count: the operator checked the group and wants it
+        // sent again, so earlier unconfirmed presses no longer block sending (confirmed parts still never repeat).
+        if (job.attempts < local.attempt && local.pressedRefs.isNotEmpty()) {
+            logger.info(TAG, "Text report ${short(job.id)} retried from the Command Center: earlier unconfirmed sends cleared")
+            local = save(local.copy(pressedRefs = emptySet(), attempt = job.attempts))
+        }
         if (local.status == SENT) {
             // Already in the chat (recorded here): make sure the backend knows, never send again.
             if (local.pendingResult == null) report(config, local.copy(pendingResult = RESULT_SENT))
@@ -130,6 +136,10 @@ class TextDeliveryUseCase(
             override suspend fun partConfirmed(ref: String, verification: String) {
                 local = save(local.copy(sentRefs = local.sentRefs + ref, verification = verification))
             }
+
+            override suspend fun sendNotRegistered(ref: String) {
+                local = save(local.copy(pressedRefs = local.pressedRefs - ref))
+            }
         }
         val outcome = sender.unavailableReason()?.let { SendOutcome.Failed(it, retryable = true) }
             ?: runCatching {
@@ -140,6 +150,7 @@ class TextDeliveryUseCase(
                         sourceGroup = sourceGroupName?.takeIf { it.isNotBlank() },
                         parts = local.parts,
                         alreadySentRefs = local.sentRefs,
+                        pressedRefs = local.pressedRefs,
                     ),
                     progress,
                 )
