@@ -49,7 +49,7 @@ class RoomTextDeliveryRepository(private val dao: TextDeliveryDao) : TextDeliver
             id = id, reportId = reportId, kind = kind, dedupeKey = dedupeKey, destinationGroup = destinationGroup,
             sourceGroup = sourceGroup,
             parts = runCatching { json.decodeFromString(partsSerializer, partsJson) }.getOrDefault(emptyList())
-                .map { MessagePart(it.text, it.ref) },
+                .map { MessagePart(it.text, it.ref, it.label) },
             periodStart = periodStart, periodEnd = periodEnd, reportCount = reportCount,
             status = TextDeliveryStatus.of(status), attempt = attempt, lastError = lastError, verification = verification,
             sentRefs = refs(sentRefs), pressedRefs = refs(pressedRefs), pendingResult = pendingResult,
@@ -60,7 +60,7 @@ class RoomTextDeliveryRepository(private val dao: TextDeliveryDao) : TextDeliver
         fun TextReportDelivery.toEntity() = TextDeliveryEntity(
             id = id, reportId = reportId, kind = kind, dedupeKey = dedupeKey, destinationGroup = destinationGroup,
             sourceGroup = sourceGroup,
-            partsJson = json.encodeToString(partsSerializer, parts.map { TextMessagePart(it.text, it.ref) }),
+            partsJson = json.encodeToString(partsSerializer, parts.map { TextMessagePart(it.text, it.ref, it.label) }),
             periodStart = periodStart, periodEnd = periodEnd, reportCount = reportCount, status = status.name,
             attempt = attempt, lastError = lastError, verification = verification,
             sentRefs = sentRefs.joinToString(","), pressedRefs = pressedRefs.joinToString(","),

@@ -115,6 +115,9 @@ class ConsolidatedFlowE2ETest {
 
     private fun JsonObject.delivery(type: String): String = this[if (type == "TEXT") "textDelivery" else "pdfDelivery"]!!.jsonObject["status"]!!.jsonPrimitive.content
 
+    /** The zero-width characters of the invisible reference. */
+    private val invisible = Regex("[\u2063\u200B\u200C\u200D\u2060]")
+
     private fun notification(group: String, text: String) =
         Snapshots.groupMessaging(group = group, messages = listOf(SnapshotMessage(text, System.currentTimeMillis(), "Field Engineer")))
 
@@ -208,11 +211,15 @@ class ConsolidatedFlowE2ETest {
         val sentTexts = whatsApp.messagesIn(destination)
         assertEquals(2, sentTexts.size)
         for (t in sentTexts) {
-            assertTrue(t.startsWith("📋 OKB CONSOLIDATED FLOOD MONITORING REPORT"))
-            assertTrue(t.contains("1) MM1DEO"))
-            assertTrue(t.contains("Ref: OKB-"))
+            // What readers see: no "Reports / Ref" line, the source at the bottom.
+            val visible = invisible.replace(t, "")
+            assertTrue(visible.startsWith("📋 OKB CONSOLIDATED FLOOD MONITORING REPORT"))
+            assertTrue(visible.contains("1) MM1DEO"))
+            assertTrue(!visible.contains("Ref: ") && !visible.contains("Reports: "))
+            assertTrue(visible.endsWith("Source: https://okb-website-repo.vercel.app/command/reports/incoming"))
         }
-        assertEquals(2, sentTexts.map { Regex("Ref: (OKB-[0-9A-F]+)").find(it)!!.groupValues[1] }.toSet().size)
+        // Each message carries its own invisible reference (what the phone looks for in the chat).
+        assertEquals(2, sentTexts.map { Regex("\u2063[\u200B\u200C\u200D\u2060]+").find(it)!!.value }.toSet().size)
         assertTrue(whatsApp.messagesIn(source).isEmpty())
         File("build/e2e").apply { mkdirs() }.let { File(it, "consolidated-e2e.txt").writeText(sentTexts.first()) }
         assertEquals("sent", historyRow(base, "TEXT").delivery("TEXT"))
@@ -297,7 +304,7 @@ class ConsolidatedFlowE2ETest {
         assertEquals(0, first.pdfSent)
         // The text report goes even though the PDF needs another try.
         assertEquals(1, first.textSent)
-        assertEquals(1, whatsApp.messagesIn(destination).count { it.startsWith("📋 OKB CONSOLIDATED FLOOD MONITORING REPORT") })
+        assertEquals(1, whatsApp.messagesIn(destination).count { invisible.replace(it, "").startsWith("📋 OKB CONSOLIDATED FLOOD MONITORING REPORT") })
         assertEquals("sent", historyRow(phone.base, "PDF").delivery("TEXT"))
         val id = deliveries.observeRecent().first().single().id
         // The operator is told why and can send it by hand; the Command Center shows the same reason.
@@ -326,6 +333,6 @@ class ConsolidatedFlowE2ETest {
         assertEquals(0, later.pdfSent)
         assertEquals(0, later.textSent)
         assertEquals(1, whatsApp.documentsIn(destination).size)
-        assertEquals(1, whatsApp.messagesIn(destination).count { it.startsWith("📋 OKB CONSOLIDATED FLOOD MONITORING REPORT") })
+        assertEquals(1, whatsApp.messagesIn(destination).count { invisible.replace(it, "").startsWith("📋 OKB CONSOLIDATED FLOOD MONITORING REPORT") })
     }
 }

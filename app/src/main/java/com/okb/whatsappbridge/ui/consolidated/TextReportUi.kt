@@ -90,7 +90,7 @@ fun AutomaticTextReportCard(
                 },
             )
         }
-        delivery.parts.firstOrNull()?.ref?.let { KeyValueLine("Ref", it) }
+        delivery.parts.firstOrNull()?.display?.let { KeyValueLine("Ref", it) }
         ButtonRow {
             OutlinedButton(onClick = onRefresh, enabled = !busy) { Text("Refresh") }
             // A report still being sent keeps its card (and its duplicate protection) until it is sent or failed.

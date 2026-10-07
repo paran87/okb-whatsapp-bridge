@@ -3,8 +3,14 @@ package com.okb.whatsappbridge.automation
 import com.okb.whatsappbridge.whatsapp.GroupAllowlist
 import kotlinx.coroutines.delay
 
-/** One WhatsApp message of a consolidated TEXT report; [ref] ("OKB-1A2B3C4D") is printed in its header. */
-data class MessagePart(val text: String, val ref: String)
+/**
+ * One WhatsApp message of a consolidated TEXT report. [ref] is in its text and is what the chat is searched for
+ * (newer reports: an invisible marker in the title line; older ones: "OKB-1A2B3C4D" printed in the header);
+ * [label] is the readable reference shown in the app and in messages.
+ */
+data class MessagePart(val text: String, val ref: String, val label: String? = null) {
+    val display: String get() = label ?: ref
+}
 
 data class TextSendRequest(
     val deliveryId: String,
@@ -177,9 +183,9 @@ class WhatsAppTextSender(
     private suspend fun sendPart(part: MessagePart, destination: String, request: TextSendRequest, progress: SendProgress): String {
         // Never twice: an earlier attempt (interrupted, or offline) may already have put it in the chat.
         if (findInChat(part.ref, searchHistory = true) != null) {
-            val verification = confirmStatus(part.ref, destination, alreadyThere = true)
+            val verification = confirmStatus(part, destination, alreadyThere = true)
             progress.partConfirmed(part.ref, verification)
-            log("Ref ${part.ref} already in the chat: not sent again")
+            log("Ref ${part.display} already in the chat: not sent again")
             return verification
         }
         if (part.ref in request.pressedRefs) fail(UNCONFIRMED_EARLIER, retryable = false)
@@ -195,7 +201,7 @@ class WhatsAppTextSender(
             progress.sendNotRegistered(part.ref)
             fail("The WhatsApp Send button could not be pressed")
         }
-        log("Send pressed for Ref ${part.ref}")
+        log("Send pressed for Ref ${part.display}")
 
         // WhatsApp takes the message: it appears in the chat and the message box no longer holds it (empty, or
         // showing its placeholder). The box is re-read each time, never answered from a cached copy.
@@ -213,12 +219,12 @@ class WhatsAppTextSender(
             // WhatsApp emptied the message box, which it only does when it takes the message; some WhatsApp
             // versions just do not expose message text to read it back.
             val verification = "WhatsApp took the message (message box emptied after Send) in \"$destination\"; " +
-                "Ref ${part.ref} could not be read back from the chat"
+                "Ref ${part.display} could not be read back from the chat"
             progress.partConfirmed(part.ref, verification)
             log(verification)
             return verification
         }
-        val verification = confirmStatus(part.ref, destination, alreadyThere = false)
+        val verification = confirmStatus(part, destination, alreadyThere = false)
         progress.partConfirmed(part.ref, verification)
         return verification
     }
@@ -230,19 +236,20 @@ class WhatsAppTextSender(
     private fun freshEntry(root: UiNode?): UiNode? = entryField(root)?.also { it.refresh() }
 
     /** Waits for WhatsApp's tick status of the message. Pending → not sent (yet); unreadable → the visible message counts. */
-    private suspend fun confirmStatus(ref: String, destination: String, alreadyThere: Boolean): String {
+    private suspend fun confirmStatus(part: MessagePart, destination: String, alreadyThere: Boolean): String {
+        val ref = part.ref
         val start = clock()
         var unknownSince: Long? = null
         while (true) {
             val node = findInChat(ref, searchHistory = false)
             val status = node?.let(::messageStatus)
             when {
-                status == Status.CONFIRMED -> return verificationText(ref, destination, alreadyThere, statusLabel(node))
+                status == Status.CONFIRMED -> return verificationText(part.display, destination, alreadyThere, statusLabel(node))
                 status == Status.UNKNOWN || node == null -> {
                     val since = unknownSince ?: clock().also { unknownSince = it }
                     if (clock() - since >= timing.unknownStatusMs) {
                         if (node == null) fail("The message disappeared from the chat after sending")
-                        return verificationText(ref, destination, alreadyThere, null)
+                        return verificationText(part.display, destination, alreadyThere, null)
                     }
                 }
                 else -> unknownSince = null // pending: keep waiting

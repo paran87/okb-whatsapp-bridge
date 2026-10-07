@@ -263,7 +263,7 @@ class TextDeliveryUseCase(
         dedupeKey = job.dedupeKey,
         destinationGroup = job.destinationGroup.trim(),
         sourceGroup = job.sourceGroup,
-        parts = job.parts.map { MessagePart(it.text, it.ref) },
+        parts = job.parts.map { MessagePart(it.text, it.ref, it.label) },
         periodStart = job.periodStart,
         periodEnd = job.periodEnd,
         reportCount = job.reportCount,
@@ -274,7 +274,7 @@ class TextDeliveryUseCase(
     )
 
     private fun describe(d: TextReportDelivery) =
-        "${if (d.isTest) "TEST " else ""}${d.reportCount ?: "?"} report(s), ref ${d.parts.firstOrNull()?.ref ?: short(d.id)}"
+        "${if (d.isTest) "TEST " else ""}${d.reportCount ?: "?"} report(s), ref ${d.parts.firstOrNull()?.display ?: short(d.id)}"
 
     private fun short(id: String) = id.take(8)
 

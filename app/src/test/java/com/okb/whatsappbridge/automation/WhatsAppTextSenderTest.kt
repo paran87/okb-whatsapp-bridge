@@ -278,4 +278,25 @@ class WhatsAppTextSenderTest {
             override val children: List<UiNode> get() = node.children.filter(keep).map { Filtered(it, keep) }
         }
     }
+
+    @Test
+    fun `a report whose reference is invisible is sent once and confirmed, and never sent twice`() = runTest {
+        // Newer reports: no "Ref:" line; the reference is zero-width characters in the title.
+        val marker = "\u2063\u200B\u200C\u200D\u2060\u200B\u200B\u200C\u200C"
+        val text = "📋${marker} OKB CONSOLIDATED FLOOD MONITORING REPORT\nReporting Period: October 7, 2026, 12:00 PM – 06:00 PM\n\n1) MM1DEO\nFlooding along Acacia Lane." +
+            "\n\nSource: https://okb-website-repo.vercel.app/command/reports/incoming"
+        val invisiblePart = MessagePart(text, marker, "OKB-06FBC8C6")
+        val wa = whatsApp()
+        val outcome = sender(wa).send(wa.pkg, request(parts = listOf(invisiblePart)), progress)
+        assertTrue(outcome is SendOutcome.Sent)
+        assertTrue((outcome as SendOutcome.Sent).verification.startsWith("Ref OKB-06FBC8C6 visible in \"$destination\""))
+        assertEquals(listOf(text), wa.messagesIn(destination))
+
+        // A second attempt (e.g. after a restart) finds it in the chat and does not send it again.
+        events.clear()
+        val again = sender(wa).send(wa.pkg, request(parts = listOf(invisiblePart)), progress)
+        assertTrue(again is SendOutcome.Sent)
+        assertEquals(1, wa.messagesIn(destination).size)
+        assertEquals(listOf("confirmed $marker"), events)
+    }
 }

@@ -110,7 +110,13 @@ data class ConsolidatedNextResponse(
 
 /** One part of a consolidated TEXT report: the WhatsApp message and the reference printed in it. */
 @Serializable
-data class TextMessagePart(val text: String, val ref: String)
+data class TextMessagePart(
+    val text: String,
+    /** What the phone looks for in the chat (newer reports: an invisible marker in the title line). */
+    val ref: String,
+    /** Readable reference ("OKB-1A2B3C4D") for the app and its messages; absent from older reports. */
+    val label: String? = null,
+)
 
 /** A consolidated TEXT report the phone sends automatically to [destinationGroup]. */
 @Serializable
