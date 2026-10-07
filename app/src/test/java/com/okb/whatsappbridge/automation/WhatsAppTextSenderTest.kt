@@ -181,6 +181,20 @@ class WhatsAppTextSenderTest {
         assertFalse((sender(wa).send(wa.pkg, request(parts = listOf(MessagePart(" ", "x"))), progress) as SendOutcome.Failed).retryable)
     }
 
+    @Test
+    fun `WhatsApp blocked from opening (e g Xiaomi background pop-up permission) - says what is on screen, sends nothing`() = runTest {
+        val wa = whatsApp()
+        val blocked = object : WhatsAppUi by wa {
+            override fun foregroundPackage(): String = "com.android.systemui"
+            override fun root(): UiNode? = null
+        }
+        val outcome = sender(blocked).send(wa.pkg, request(), progress) as SendOutcome.Failed
+        assertTrue(outcome.reason, outcome.reason.contains("on screen: com.android.systemui"))
+        assertTrue(outcome.reason, outcome.reason.contains("Display pop-up windows while running in the background"))
+        assertTrue(outcome.retryable)
+        assertEquals(0, wa.sendPresses)
+    }
+
     /** WhatsApp whose chat list does not show [hidden]; only search finds it. */
     private class SearchOnlyWhatsApp(visible: List<String>, private val hidden: String) : WhatsAppUi {
         val inner = FakeWhatsApp(visible + hidden)

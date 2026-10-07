@@ -99,8 +99,17 @@ class WhatsAppTextSender(
 
     private suspend fun openChat(packageName: String, destination: String) {
         if (!ui.launch(packageName)) fail("WhatsApp could not be opened")
-        await("WhatsApp did not come to the foreground (is the screen locked with a PIN or pattern?)") {
-            ui.foregroundPackage() == packageName && ui.root() != null
+        var inFront: String? = null
+        val appeared = poll(timing.stepTimeoutMs) {
+            inFront = ui.foregroundPackage()
+            inFront == packageName && ui.root() != null
+        }
+        if (!appeared) {
+            fail(
+                "WhatsApp did not come to the foreground (on screen: ${inFront ?: "another app or the lock screen"}). " +
+                    "On Xiaomi/Redmi/POCO allow \"Display pop-up windows while running in the background\" and \"Show on Lock screen\" " +
+                    "for OKB WhatsApp Bridge; a PIN, pattern or password lock also prevents it.",
+            )
         }
         // WhatsApp may reopen a chat or another tab: go back to the chat list (bounded).
         for (i in 0 until 3) {

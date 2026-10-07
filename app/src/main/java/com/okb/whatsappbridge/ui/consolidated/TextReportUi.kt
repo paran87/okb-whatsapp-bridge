@@ -89,6 +89,8 @@ fun AutomaticSendingPanel(
     onOpenAccessibility: () -> Unit,
     onOpenAlarms: () -> Unit,
     onOpenScreenLock: () -> Unit,
+    /** Xiaomi/Redmi/POCO only: their extra background-start and lock-screen permissions (not readable by apps). */
+    onOpenXiaomiPermissions: (() -> Unit)? = null,
 ) {
     val ok = readiness.ready && destinationGroup.isNotBlank()
     Panel(title = "Automatic Text Reports", accent = (if (ok) StatusLevel.OK else StatusLevel.WARNING).color()) {
@@ -117,6 +119,14 @@ fun AutomaticSendingPanel(
             if (readiness.secureLockScreen) "PIN / pattern / password" else "None or Swipe",
             if (readiness.secureLockScreen) "A locked phone cannot send: Android does not let apps unlock a PIN, pattern or password." else null,
         )
+        if (onOpenXiaomiPermissions != null) {
+            StatusLine(
+                "Xiaomi permissions",
+                StatusLevel.INFO,
+                "Check",
+                "Other permissions → allow \"Display pop-up windows while running in the background\" and \"Show on Lock screen\". Without them WhatsApp cannot be opened automatically.",
+            )
+        }
         StatusLine(
             "Destination",
             if (destinationGroup.isNotBlank()) StatusLevel.OK else StatusLevel.ERROR,
@@ -130,8 +140,9 @@ fun AutomaticSendingPanel(
                 "Fix the items above, or the TEXT report cannot be sent while nobody is using the phone."
             },
         )
-        if (!readiness.ready) {
+        if (!readiness.ready || onOpenXiaomiPermissions != null) {
             ButtonRow {
+                if (onOpenXiaomiPermissions != null) OutlinedButton(onClick = onOpenXiaomiPermissions) { Text("Xiaomi permissions") }
                 if (!readiness.accessibilityEnabled || !readiness.accessibilityConnected) {
                     OutlinedButton(onClick = onOpenAccessibility) { Text("Accessibility") }
                 }

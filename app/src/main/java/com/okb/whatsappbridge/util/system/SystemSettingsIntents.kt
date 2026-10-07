@@ -79,6 +79,26 @@ object SystemSettingsIntents {
         return startFirst(context, vendor + appDetails(context.packageName))
     }
 
+    /** Xiaomi, Redmi and POCO (MIUI / HyperOS) add their own background-start and lock-screen permissions. */
+    fun isXiaomi(): Boolean = Build.MANUFACTURER.lowercase() in setOf("xiaomi", "redmi", "poco")
+
+    /**
+     * MIUI / HyperOS "Other permissions" for this app: "Display pop-up windows while running in the background"
+     * (needed to open WhatsApp from the background) and "Show on Lock screen". Falls back to the app details page.
+     */
+    fun openXiaomiOtherPermissions(context: Context): Boolean = startFirst(
+        context,
+        listOf(
+            Intent("miui.intent.action.APP_PERM_EDITOR")
+                .setClassName("com.miui.securitycenter", "com.miui.permcenter.permissions.PermissionsEditorActivity")
+                .putExtra("extra_pkgname", context.packageName),
+            Intent("miui.intent.action.APP_PERM_EDITOR")
+                .setClassName("com.miui.securitycenter", "com.miui.permcenter.permissions.AppPermissionsEditorActivity")
+                .putExtra("extra_pkgname", context.packageName),
+            appDetails(context.packageName),
+        ),
+    )
+
     /** True on manufacturers known to have a separate Autostart permission. */
     fun hasAutostartSettings(): Boolean = autostartComponents.any { (brand, _) -> Build.MANUFACTURER.equals(brand, ignoreCase = true) }
 

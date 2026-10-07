@@ -7,10 +7,13 @@ import android.content.Intent
 import android.os.Build
 import android.provider.Settings
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import com.okb.whatsappbridge.OkbBridgeApplication
 import com.okb.whatsappbridge.automation.AccessibilityUiNode
 import com.okb.whatsappbridge.automation.UiNode
 import com.okb.whatsappbridge.automation.WhatsAppUi
+import com.okb.whatsappbridge.whatsapp.WhatsAppPackages
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -43,9 +46,23 @@ class WhatsAppAutomationService : AccessibilityService(), WhatsAppUi {
         super.onDestroy()
     }
 
-    override fun root(): UiNode? = rootInActiveWindow?.let(::AccessibilityUiNode)
+    override fun root(): UiNode? = whatsAppRoot()?.let(::AccessibilityUiNode)
 
-    override fun foregroundPackage(): String? = rootInActiveWindow?.packageName?.toString()
+    override fun foregroundPackage(): String? =
+        whatsAppRoot()?.packageName?.toString() ?: rootInActiveWindow?.packageName?.toString()
+
+    /**
+     * WhatsApp's window when WhatsApp is the app on screen. Input focus can sit on a system overlay (notification
+     * shade, a manufacturer pop-up) while WhatsApp is open underneath, so the topmost application window is used
+     * when the focused window is not WhatsApp's.
+     */
+    private fun whatsAppRoot(): AccessibilityNodeInfo? {
+        rootInActiveWindow?.let { if (WhatsAppPackages.isWhatsApp(it.packageName?.toString())) return it }
+        val topApp = runCatching { windows }.getOrNull()
+            ?.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION } ?: return null
+        val root = topApp.root ?: return null
+        return root.takeIf { WhatsAppPackages.isWhatsApp(it.packageName?.toString()) }
+    }
 
     override fun launch(packageName: String): Boolean {
         val intent = packageManager.getLaunchIntentForPackage(packageName) ?: return false
