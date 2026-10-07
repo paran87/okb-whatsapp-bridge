@@ -17,7 +17,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 /**
  * Automatic TEXT sending on the dedicated bridge phone:
  *
- *   wake the screen (wake lock) → dismiss a non-secure lock screen (UnlockActivity) → drive WhatsApp through the
+ *   wake the screen (wake lock) → dismiss a non-secure lock screen (UnlockActivity, else a swipe-up gesture;
+ *   see ScreenUnlocker) → drive WhatsApp through the
  *   accessibility service (WhatsAppTextSender) → go back to the home screen → turn the screen off again if it was
  *   off → release the wake lock.
  *
@@ -51,20 +52,17 @@ class AndroidAutomaticTextSender(
         val screenWasOff = power?.isInteractive == false
         val wakeLock = screenWakeLock(power)
         try {
-            // The activity turns the screen on (setTurnScreenOn) and dismisses a non-secure lock screen.
-            if (screenWasOff || keyguard?.isKeyguardLocked == true) {
-                val dismissed = UnlockActivity.dismissKeyguard(service)
-                if (keyguard?.isKeyguardLocked == true || !dismissed) {
-                    return@withContext SendOutcome.Failed(
-                        if (keyguard?.isDeviceSecure == true) {
-                            "The phone is locked with a PIN, pattern or password, which Android does not let apps unlock. " +
-                                "Set Screen lock to None or Swipe on the bridge phone."
-                        } else {
-                            "The lock screen could not be dismissed"
-                        },
-                    )
-                }
-            }
+            // The wake lock turns the screen on; a non-secure lock screen is dismissed (or swiped away).
+            if (screenWasOff) delay(SETTLE_MS)
+            val unlocker = ScreenUnlocker(
+                isLocked = { keyguard?.isKeyguardLocked == true },
+                isSecure = { keyguard?.isDeviceSecure == true },
+                dismiss = { UnlockActivity.dismissKeyguard(service) },
+                swipeUp = { attempt -> service.swipeUp(attempt) },
+                sleep = { delay(it) },
+                log = { logger.info(TAG, it) },
+            )
+            unlocker.unlock()?.let { return@withContext SendOutcome.Failed(it) }
             delay(SETTLE_MS)
             withTimeoutOrNull(SEND_TIMEOUT_MS) {
                 WhatsAppTextSender(service, log = { logger.info(TAG, it) }).send(pkg, request, progress)

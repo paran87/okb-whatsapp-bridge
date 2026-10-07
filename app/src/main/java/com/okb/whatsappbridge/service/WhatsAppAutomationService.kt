@@ -1,6 +1,8 @@
 package com.okb.whatsappbridge.service
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
+import android.graphics.Path
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -16,6 +18,8 @@ import com.okb.whatsappbridge.automation.WhatsAppUi
 import com.okb.whatsappbridge.whatsapp.WhatsAppPackages
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 /**
  * Accessibility service used ONLY to send the automatic consolidated TEXT report into the configured WhatsApp
@@ -78,6 +82,40 @@ class WhatsAppAutomationService : AccessibilityService(), WhatsAppUi {
     override fun back(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
 
     override fun home(): Boolean = performGlobalAction(GLOBAL_ACTION_HOME)
+
+    /**
+     * Swipes up from the lower part of the screen, as a person dismisses a Swipe lock screen. Later attempts
+     * start a little higher (clear of a gesture-navigation bar). True when Android completed the gesture.
+     */
+    suspend fun swipeUp(attempt: Int): Boolean {
+        val metrics = resources.displayMetrics
+        val x = metrics.widthPixels / 2f
+        val startY = metrics.heightPixels * (0.85f - 0.1f * attempt.coerceIn(0, 2))
+        val endY = metrics.heightPixels * 0.25f
+        val path = Path().apply {
+            moveTo(x, startY)
+            lineTo(x, endY)
+        }
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0, 300))
+            .build()
+        return suspendCancellableCoroutine { cont ->
+            val started = dispatchGesture(
+                gesture,
+                object : GestureResultCallback() {
+                    override fun onCompleted(gestureDescription: GestureDescription?) {
+                        if (cont.isActive) cont.resume(true)
+                    }
+
+                    override fun onCancelled(gestureDescription: GestureDescription?) {
+                        if (cont.isActive) cont.resume(false)
+                    }
+                },
+                null,
+            )
+            if (!started && cont.isActive) cont.resume(false)
+        }
+    }
 
     /** Turns the screen off again after an automatic send that woke the phone (Android 9+). */
     fun lockScreen(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
