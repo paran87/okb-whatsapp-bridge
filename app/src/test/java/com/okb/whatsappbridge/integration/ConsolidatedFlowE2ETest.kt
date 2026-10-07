@@ -101,8 +101,11 @@ class ConsolidatedFlowE2ETest {
     private fun control(path: String = "state"): JsonObject = Json.parseToJsonElement(call("GET", "$controlUrl/$path")).jsonObject
 
     /** The Command Center's view of the (single) consolidated report. */
-    private fun historyRow(base: String): JsonObject =
-        Json.parseToJsonElement(call("GET", "$base/api/v1/consolidated-reports", admin = true)).jsonObject["reports"]!!.jsonArray.single().jsonObject
+    /** The Command Center's view of the report sent as [type] (each schedule entry is sent as TEXT or as PDF). */
+    private fun historyRow(base: String, type: String): JsonObject =
+        Json.parseToJsonElement(call("GET", "$base/api/v1/consolidated-reports", admin = true)).jsonObject["reports"]!!.jsonArray
+            .map { it.jsonObject }
+            .single { it[if (type == "TEXT") "textDelivery" else "pdfDelivery"] is JsonObject }
 
     private fun JsonObject.delivery(type: String): String = this[if (type == "TEXT") "textDelivery" else "pdfDelivery"]!!.jsonObject["status"]!!.jsonPrimitive.content
 
@@ -134,7 +137,10 @@ class ConsolidatedFlowE2ETest {
         call("PUT", "$base/api/v1/consolidated-reports/settings", """{"settings":{"enabled":true}}""", admin = true)
         val start = java.time.Instant.now().minusSeconds(60).truncatedTo(java.time.temporal.ChronoUnit.SECONDS)
         val end = start.plusSeconds(16 * 60)
-        call("POST", "$base/api/v1/consolidated-reports/schedules", """{"periodStart":"$start","periodEnd":"$end","sendAt":"$end"}""", admin = true)
+        // The same period twice: once sent as TEXT (automatic), once as PDF (manual, from the phone).
+        for (type in listOf("TEXT", "PDF")) {
+            call("POST", "$base/api/v1/consolidated-reports/schedules", """{"periodStart":"$start","periodEnd":"$end","sendAt":"$end","deliveryType":"$type"}""", admin = true)
+        }
         Thread.sleep(1_100) // message times are whole seconds: the report must come after the moment it was enabled
 
         // TEST 1-3: capture only from the source group.
@@ -185,7 +191,7 @@ class ConsolidatedFlowE2ETest {
         assertTrue(sentTexts.single().contains("Ref: OKB-"))
         assertTrue(whatsApp.messagesIn(source).isEmpty())
         File("build/e2e").apply { mkdirs() }.let { File(it, "consolidated-e2e.txt").writeText(sentTexts.single()) }
-        assertEquals("sent", historyRow(base).delivery("TEXT"))
+        assertEquals("sent", historyRow(base, "TEXT").delivery("TEXT"))
         assertEquals(com.okb.whatsappbridge.domain.model.TextDeliveryStatus.SENT, textDeliveries.observeRecent().first().single().status)
 
         // TEST 5: downloaded, verified PDF, ready to send, with both groups.
@@ -196,10 +202,11 @@ class ConsolidatedFlowE2ETest {
         val pdf = ConsolidatedReportCheckUseCase.pdfFile(dir, ready.id, ready.fileName)!!
         assertTrue(ConsolidatedReportCheckUseCase.isPdf(pdf))
         File("build/e2e").apply { mkdirs() }.let { pdf.copyTo(File(it, "consolidated-e2e.pdf"), overwrite = true) }
-        val generated = control()["consolidated"]!!.jsonArray.single().jsonObject
-        assertEquals(1, (generated["reportIds"] as JsonArray).size)
-        // The PDF is independent of the TEXT: on the phone, waiting for the operator.
-        assertEquals("notified", historyRow(base).delivery("PDF"))
+        val generated = control()["consolidated"]!!.jsonArray.map { it.jsonObject }
+        assertEquals(2, generated.size) // one report per schedule entry
+        assertTrue(generated.all { (it["reportIds"] as JsonArray).size == 1 })
+        // The TEXT entry sent no PDF to the phone; the PDF entry's PDF waits for the operator.
+        assertEquals("notified", historyRow(base, "PDF").delivery("PDF"))
 
         // TEST 10: duplicate syncs neither re-download nor re-notify, and never send the TEXT again.
         assertEquals(0, check().newlyReady)
@@ -210,22 +217,24 @@ class ConsolidatedFlowE2ETest {
 
         // TEST 8: share screen opened then cancelled → not sent; then opened again and confirmed → sent.
         check.markOpened(ready.id)
-        assertEquals("opened", historyRow(base).delivery("PDF"))
+        assertEquals("opened", historyRow(base, "PDF").delivery("PDF"))
         check.markNotSent(ready.id)
         assertEquals(ConsolidatedDeliveryStatus.READY_FOR_WHATSAPP, deliveries.get(ready.id)!!.status)
-        assertEquals("notified", historyRow(base).delivery("PDF"))
+        assertEquals("notified", historyRow(base, "PDF").delivery("PDF"))
         check.markOpened(ready.id)
         check.confirmSent(ready.id)
-        val final = historyRow(base)
+        val final = historyRow(base, "PDF")
         assertEquals("sent", final.delivery("PDF"))
         assertTrue(final["pdfDelivery"]!!.jsonObject["sentAt"]!!.jsonPrimitive.content.isNotBlank())
         assertEquals(ConsolidatedDeliveryStatus.SENT, deliveries.get(ready.id)!!.status)
 
-        // Command Center history shows both outcomes and the phone's groups.
-        val row = historyRow(base)
+        // Command Center history: the TEXT entry's outcome and the phone's groups; it has no PDF delivery.
+        val row = historyRow(base, "TEXT")
         assertEquals("sent", row.delivery("TEXT"))
         assertEquals(destination, row["textDelivery"]!!.jsonObject["destinationGroup"]!!.jsonPrimitive.content)
         assertEquals(destination, row["destinationGroup"]!!.jsonPrimitive.content)
         assertEquals(source, row["sourceGroup"]!!.jsonPrimitive.content)
+        assertTrue(row["pdfDelivery"] !is JsonObject)
+        assertTrue(historyRow(base, "PDF")["textDelivery"] !is JsonObject)
     }
 }
