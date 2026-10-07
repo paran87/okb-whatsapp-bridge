@@ -26,6 +26,8 @@ class AccessibilityUiNode(private val info: AccessibilityNodeInfo) : UiNode {
         return info.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
     }
 
+    override fun refresh(): Boolean = info.refresh()
+
     override fun scrollBackward(): Boolean = info.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
 
     override fun equals(other: Any?): Boolean = other is AccessibilityUiNode && other.info == info

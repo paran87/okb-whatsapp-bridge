@@ -19,6 +19,8 @@ interface UiNode {
      */
     val isShowingHint: Boolean get() = false
     val children: List<UiNode>
+    /** Re-reads the element from the app (Android otherwise may answer from a cached copy). */
+    fun refresh(): Boolean = true
     val parent: UiNode?
     fun click(): Boolean
     fun setText(value: String): Boolean

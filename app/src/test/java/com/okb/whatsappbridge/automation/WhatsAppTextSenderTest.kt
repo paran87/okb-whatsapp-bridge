@@ -214,17 +214,41 @@ class WhatsAppTextSenderTest {
     }
 
     @Test
-    fun `taken by WhatsApp but unreadable in the chat - stops without sending again on the next attempt`() = runTest {
+    fun `taken by WhatsApp (box emptied) but unreadable in the chat - counts as sent, never sent again`() = runTest {
         val wa = whatsApp()
         wa.messageText = FakeWhatsApp.MessageTextMode.UNREADABLE
-        val first = sender(wa).send(wa.pkg, request(), progress) as SendOutcome.Failed
-        assertEquals(WhatsAppTextSender.UNCONFIRMED_NOW, first.reason)
-        assertFalse(first.retryable)
+        val first = sender(wa).send(wa.pkg, request(), progress) as SendOutcome.Sent
+        assertTrue(first.verification, first.verification.contains("message box emptied"))
         assertEquals(1, wa.messagesIn(destination).size)
+        assertTrue(events.contains("confirmed OKB-1A2B3C4D"))
+    }
 
-        // The next attempt knows Send was pressed: it does not press again.
+    @Test
+    fun `an earlier unconfirmed press whose message cannot be found - stops instead of sending again`() = runTest {
+        val wa = whatsApp()
+        wa.messageText = FakeWhatsApp.MessageTextMode.UNREADABLE
+        wa.addMessage(destination, report)
         val second = sender(wa).send(wa.pkg, request(pressed = setOf(part.ref)), progress) as SendOutcome.Failed
         assertEquals(WhatsAppTextSender.UNCONFIRMED_EARLIER, second.reason)
+        assertFalse(second.retryable)
+        assertEquals(0, wa.sendPresses)
+    }
+
+    @Test
+    fun `a stale message box after Send (the real-phone report) is re-read, so a sent message is not reported as failed`() = runTest {
+        val wa = whatsApp()
+        wa.staleBoxUntilRefresh = true
+        assertTrue(sender(wa).send(wa.pkg, request(), progress) is SendOutcome.Sent)
+        assertEquals(listOf(report), wa.messagesIn(destination))
+        assertFalse(events.any { it.startsWith("not registered") })
+    }
+
+    @Test
+    fun `stale box and unreadable chat - still sent once and never pressed again`() = runTest {
+        val wa = whatsApp()
+        wa.staleBoxUntilRefresh = true
+        wa.messageText = FakeWhatsApp.MessageTextMode.UNREADABLE
+        assertTrue(sender(wa).send(wa.pkg, request(), progress) is SendOutcome.Sent)
         assertEquals(1, wa.sendPresses)
         assertEquals(1, wa.messagesIn(destination).size)
     }

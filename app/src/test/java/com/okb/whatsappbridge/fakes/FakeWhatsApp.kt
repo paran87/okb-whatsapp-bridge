@@ -41,6 +41,12 @@ class FakeWhatsApp(
     var showStatusIcons = true
     /** Like Android: an empty message box reports its placeholder "Message" as text (isShowingHint = true). */
     var emptyBoxShowsHint = true
+    /**
+     * Like Android's accessibility cache without content events: after Send the message box keeps reporting the
+     * sent text until the node is refreshed.
+     */
+    var staleBoxUntilRefresh = false
+    private var staleBoxText: String? = null
     /** How sent message bubbles expose their text: as text (normal), only as a description, or not at all. */
     var messageText: MessageTextMode = MessageTextMode.TEXT
 
@@ -135,7 +141,9 @@ class FakeWhatsApp(
         return node("android.widget.FrameLayout", children = listOf(
             node("android.widget.TextView", id = "conversation_contact_name", text = chat),
             list,
-            node("android.widget.EditText", id = "entry",
+            staleBoxText?.let { stale ->
+                node("android.widget.EditText", id = "entry", text = stale, editable = true, onRefresh = { staleBoxText = null; true })
+            } ?: node("android.widget.EditText", id = "entry",
                 text = drafts[chat].orEmpty().ifEmpty { if (emptyBoxShowsHint) "Message" else "" },
                 hint = emptyBoxShowsHint && drafts[chat].isNullOrEmpty(), editable = true, onSetText = {
                 drafts[chat] = it
@@ -146,6 +154,7 @@ class FakeWhatsApp(
                 sendPresses++
                 val draft = drafts[chat].orEmpty()
                 if (!sendPressIgnored && draft.isNotBlank()) {
+                    if (staleBoxUntilRefresh) staleBoxText = draft
                     all.add(Message(draft, newMessageStatus))
                     drafts[chat] = ""
                     scrollBack = 0
@@ -167,9 +176,10 @@ class FakeWhatsApp(
         onClick: (() -> Boolean)? = null,
         onSetText: ((String) -> Boolean)? = null,
         onScrollBack: (() -> Boolean)? = null,
+        onRefresh: (() -> Boolean)? = null,
     ): FakeNode = FakeNode(
         className, id?.let { "$pkg:id/$it" }, text, desc, editable, clickable || onClick != null, children, onClick, onSetText, onScrollBack,
-        hint,
+        hint, onRefresh,
     ).also { n -> children.forEach { it.parentNode = n } }
 
     class FakeNode(
@@ -184,11 +194,13 @@ class FakeWhatsApp(
         private val onSetText: ((String) -> Boolean)?,
         private val onScrollBack: (() -> Boolean)?,
         override val isShowingHint: Boolean = false,
+        private val onRefresh: (() -> Boolean)? = null,
     ) : UiNode {
         var parentNode: UiNode? = null
         override val parent: UiNode? get() = parentNode
         override fun click(): Boolean = onClick?.invoke() ?: false
         override fun setText(value: String): Boolean = onSetText?.invoke(value) ?: false
         override fun scrollBackward(): Boolean = onScrollBack?.invoke() ?: false
+        override fun refresh(): Boolean = onRefresh?.invoke() ?: true
     }
 }

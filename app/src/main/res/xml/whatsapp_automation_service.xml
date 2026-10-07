@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Limited to WhatsApp: the service sees no other app. It polls the WhatsApp window only while sending.
-     canPerformGestures: swipes away a Swipe lock screen before sending (when Android's dismiss request fails). -->
+     canPerformGestures: swipes away a Swipe lock screen before sending (when Android's dismiss request fails).
+     Content and text change events keep Android's cached copy of the WhatsApp screen current: without them the
+     service read a stale message box (the report still "in the box" after WhatsApp had sent it). -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewTextChanged|typeWindowsChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews|flagRetrieveInteractiveWindows"
     android:canPerformGestures="true"

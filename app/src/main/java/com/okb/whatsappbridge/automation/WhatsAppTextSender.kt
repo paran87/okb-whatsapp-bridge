@@ -35,7 +35,7 @@ interface SendProgress {
     suspend fun beforePressSend(ref: String)
     suspend fun partConfirmed(ref: String, verification: String)
 
-    /** The press did not register (the text is still in the message box): the part was not sent. */
+    /** The press did not register (the text is still in the message box and not in the chat): not sent. */
     suspend fun sendNotRegistered(ref: String) {}
 }
 
@@ -168,7 +168,7 @@ class WhatsAppTextSender(
 
         val entry = awaitNode("The WhatsApp message box was not found") { entryField(it) }
         if (!entry.setText(part.text)) fail("The report text could not be entered in WhatsApp")
-        val typed = poll(timing.stepTimeoutMs) { entryField(ui.root())?.let { box -> !box.isShowingHint && box.text?.let { sameText(it, part.text) } == true } == true }
+        val typed = poll(timing.stepTimeoutMs) { freshEntry(ui.root())?.let { box -> !box.isShowingHint && box.text?.let { sameText(it, part.text) } == true } == true }
         if (!typed) fail("WhatsApp did not accept the report text")
 
         val sendButton = awaitNode("The WhatsApp Send button was not found") { sendButton(it) }
@@ -179,21 +179,37 @@ class WhatsAppTextSender(
         }
         log("Send pressed for Ref ${part.ref}")
 
-        // WhatsApp empties the message box when it takes the message.
-        val taken = poll(timing.confirmTimeoutMs) { entryField(ui.root())?.let(::isEmptyBox) ?: false }
-        if (!taken) {
+        // WhatsApp takes the message: it appears in the chat and the message box no longer holds it (empty, or
+        // showing its placeholder). The box is re-read each time, never answered from a cached copy.
+        val taken = poll(timing.confirmTimeoutMs) {
+            val root = ui.root()
+            sentMessage(root, part.ref) != null || freshEntry(root)?.let { !holds(it, part.ref) } == true
+        }
+        if (!taken && findInChat(part.ref, searchHistory = true) == null) {
+            // Still in the box and nowhere in the chat: the press did not reach WhatsApp. Safe to try again.
             progress.sendNotRegistered(part.ref)
             fail("Send was pressed but WhatsApp did not take the message (it is still in the message box)")
         }
         val appeared = poll(timing.confirmTimeoutMs) { findInChat(part.ref, searchHistory = false) != null }
-        if (!appeared) fail(UNCONFIRMED_NOW, retryable = false)
+        if (!appeared) {
+            // WhatsApp emptied the message box, which it only does when it takes the message; some WhatsApp
+            // versions just do not expose message text to read it back.
+            val verification = "WhatsApp took the message (message box emptied after Send) in \"$destination\"; " +
+                "Ref ${part.ref} could not be read back from the chat"
+            progress.partConfirmed(part.ref, verification)
+            log(verification)
+            return verification
+        }
         val verification = confirmStatus(part.ref, destination, alreadyThere = false)
         progress.partConfirmed(part.ref, verification)
         return verification
     }
 
-    /** Empty message box: no text, or only its placeholder ("Message"). */
-    private fun isEmptyBox(box: UiNode): Boolean = box.isShowingHint || box.text.isNullOrBlank()
+    /** The message box still holds the report (its reference), as opposed to empty or showing "Message". */
+    private fun holds(box: UiNode, ref: String): Boolean = !box.isShowingHint && box.text?.contains(ref) == true
+
+    /** The message box, re-read from WhatsApp. */
+    private fun freshEntry(root: UiNode?): UiNode? = entryField(root)?.also { it.refresh() }
 
     /** Waits for WhatsApp's tick status of the message. Pending → not sent (yet); unreadable → the visible message counts. */
     private suspend fun confirmStatus(ref: String, destination: String, alreadyThere: Boolean): String {
@@ -339,10 +355,6 @@ class WhatsAppTextSender(
     private fun fail(reason: String, retryable: Boolean = true): Nothing = throw Abort(SendOutcome.Failed(reason, retryable))
 
     companion object {
-        const val UNCONFIRMED_NOW =
-            "Send was pressed and WhatsApp took the message, but it could not be found in the chat to confirm it. " +
-                "Check the group: it is most likely there. It is not sent again automatically (no duplicates); " +
-                "use Retry in the Command Center only if it is missing."
         const val UNCONFIRMED_EARLIER =
             "An earlier attempt pressed Send for this report but it cannot be found in the chat. It is not sent again " +
                 "automatically (no duplicates); check the group and use Retry in the Command Center only if it is missing."
