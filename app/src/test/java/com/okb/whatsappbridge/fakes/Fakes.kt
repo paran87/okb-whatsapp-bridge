@@ -194,5 +194,18 @@ class FakeTextDeliveryRepository : com.okb.whatsappbridge.domain.repository.Text
     }
     override fun observeRecent(limit: Int) = flow
     override suspend fun withPendingResult() = rows.values.filter { it.pendingResult != null }
+    override suspend fun open() = rows.values.filter {
+        it.status == com.okb.whatsappbridge.domain.model.TextDeliveryStatus.SCHEDULED ||
+            it.status == com.okb.whatsappbridge.domain.model.TextDeliveryStatus.SENDING
+    }
+    override suspend fun deleteFinished(id: String): Boolean {
+        val row = rows[id] ?: return false
+        if (row.status != com.okb.whatsappbridge.domain.model.TextDeliveryStatus.SENT &&
+            row.status != com.okb.whatsappbridge.domain.model.TextDeliveryStatus.FAILED
+        ) return false
+        rows.remove(id)
+        flow.value = rows.values.toList()
+        return true
+    }
     override suspend fun deleteFinishedBefore(before: Long) = 0
 }

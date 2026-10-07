@@ -115,6 +115,8 @@ class ConsolidatedReportCheckUseCase(
         } else {
             TextDeliveryRunResult()
         }
+        // Cards of reports not offered now (cancelled, expired, waiting for a retry) show the backend's state.
+        textDelivery?.syncWithBackend(config, response.textDeliveries.map { it.id }.toSet())
 
         var newlyReady = 0
         for (remote in response.deliveries) {

@@ -195,4 +195,10 @@ data class TextReportDelivery(
     val sentAt: Long? = null,
 ) {
     val isTest: Boolean get() = kind == "test"
+    val isCancelled: Boolean get() = status == TextDeliveryStatus.FAILED && lastError == CANCELLED
+
+    companion object {
+        /** The backend's reason for a delivery cancelled in the Command Center. */
+        const val CANCELLED = "Cancelled from the Command Center"
+    }
 }

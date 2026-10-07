@@ -117,6 +117,10 @@ data class TextDeliveryJob(
     val periodStart: String? = null,
     val periodEnd: String? = null,
     val reportCount: Int? = null,
+    /** Why the last attempt failed (or "Cancelled from the Command Center"). */
+    val errorMessage: String? = null,
+    val cancelled: Boolean = false,
+    val sentAt: String? = null,
 ) {
     val isTest: Boolean get() = kind == "test"
 }

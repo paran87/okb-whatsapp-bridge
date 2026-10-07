@@ -171,5 +171,9 @@ interface TextDeliveryRepository {
     suspend fun update(delivery: TextReportDelivery)
     fun observeRecent(limit: Int = 10): Flow<List<TextReportDelivery>>
     suspend fun withPendingResult(): List<TextReportDelivery>
+    /** Scheduled or sending. */
+    suspend fun open(): List<TextReportDelivery>
+    /** Removes a SENT or FAILED row; false when it is still being sent (or unknown). */
+    suspend fun deleteFinished(id: String): Boolean
     suspend fun deleteFinishedBefore(before: Long): Int
 }

@@ -13,6 +13,7 @@ import com.okb.whatsappbridge.data.remote.dto.ConsolidatedDeliveryAckResponse
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueRequest
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueResponse
 import com.okb.whatsappbridge.data.remote.dto.TextClaimResponse
+import com.okb.whatsappbridge.data.remote.dto.TextDeliveryJob
 import com.okb.whatsappbridge.data.remote.dto.TextResultRequest
 import com.okb.whatsappbridge.data.remote.dto.TextResultResponse
 import java.io.File
@@ -62,6 +63,10 @@ interface BridgeApi {
         error: String? = null,
     ): ApiResult<ConsolidatedDeliveryAckResponse> =
         ApiResult.ConfigurationError("Consolidated reports are not supported")
+
+    /** Current state of one TEXT delivery (read-only; refreshes the Dashboard card). */
+    suspend fun getTextDelivery(config: BackendConfig, id: String): ApiResult<TextDeliveryJob> =
+        ApiResult.ConfigurationError("Automatic text reports are not supported")
 
     suspend fun claimTextDelivery(config: BackendConfig, id: String): ApiResult<TextClaimResponse> =
         ApiResult.ConfigurationError("Automatic text reports are not supported")

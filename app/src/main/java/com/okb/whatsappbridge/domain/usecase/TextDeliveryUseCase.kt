@@ -118,7 +118,7 @@ class TextDeliveryUseCase(
         if (!claim.claimed) {
             when (claim.reason) {
                 "already_sent" -> save(local.copy(status = SENT, sentAt = local.sentAt ?: clock(), lastError = null))
-                "failed" -> save(local.copy(status = FAILED))
+                "failed" -> save(local.copy(status = FAILED, lastError = claim.delivery?.errorMessage ?: local.lastError))
             }
             logger.info(TAG, "Text report ${short(job.id)} not sent now: ${claim.reason ?: "not claimed"}")
             return null
@@ -183,6 +183,46 @@ class TextDeliveryUseCase(
         }
     }
 
+    /**
+     * Brings the phone's open rows (Scheduled / Sending) up to date with the backend. Rows the backend offered in
+     * this check were just handled; the others are waiting for a retry, or were cancelled, expired or sent
+     * elsewhere, and their Dashboard card would otherwise stay "Scheduled" forever. Read-only on the backend.
+     */
+    suspend fun syncWithBackend(config: BackendConfig, offeredIds: Set<String>) = LOCK.withLock {
+        for (local in deliveries.open()) {
+            if (local.id in offeredIds || local.pendingResult != null) continue
+            when (val r = api.getTextDelivery(config, local.id)) {
+                is ApiResult.Success -> applyBackendState(local, r.value)
+                is ApiResult.HttpError -> if (r.httpCode == 403 || r.httpCode == 404) {
+                    save(local.copy(status = FAILED, lastError = if (r.httpCode == 404) GONE else r.message))
+                    logger.info(TAG, "Text report ${short(local.id)} is no longer in the Command Center")
+                }
+                is ApiResult.NetworkError, is ApiResult.ConfigurationError -> return@withLock
+            }
+        }
+    }
+
+    private suspend fun applyBackendState(local: TextReportDelivery, remote: TextDeliveryJob) {
+        val updated = when (remote.status) {
+            "sent" -> local.copy(
+                status = SENT,
+                sentAt = remote.sentAt?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() } ?: local.sentAt ?: clock(),
+                lastError = null,
+            )
+            "failed" -> local.copy(status = FAILED, lastError = remote.errorMessage ?: local.lastError ?: "Not sent")
+            // Not running in this process (all sends hold LOCK): an interrupted attempt, retried later.
+            "scheduled", "sending" -> local.copy(status = SCHEDULED, lastError = remote.errorMessage ?: local.lastError)
+            else -> return
+        }
+        if (updated.status != local.status || updated.lastError != local.lastError) {
+            save(updated)
+            logger.info(TAG, "Text report ${short(local.id)} refreshed from the Command Center: ${updated.status}")
+        }
+    }
+
+    /** Dashboard "Remove": only a SENT or FAILED report (an open one keeps its duplicate protection). */
+    suspend fun remove(id: String): Boolean = LOCK.withLock { deliveries.deleteFinished(id) }
+
     /** Reports the stored outcome; while offline it stays pending and is retried on the next check. */
     private suspend fun report(config: BackendConfig, delivery: TextReportDelivery) {
         val state = delivery.pendingResult ?: return
@@ -242,6 +282,7 @@ class TextDeliveryUseCase(
         private const val TAG = "TextReport"
         const val RESULT_SENT = "sent"
         const val RESULT_FAILED = "failed"
+        private const val GONE = "No longer in the Command Center"
         private const val ROW_RETENTION_MILLIS = 30L * 24 * 60 * 60 * 1000
 
         /** One automatic send at a time in this process (alarm worker and periodic worker may overlap). */

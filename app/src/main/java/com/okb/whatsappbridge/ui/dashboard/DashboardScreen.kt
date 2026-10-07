@@ -48,6 +48,7 @@ fun DashboardScreen(
     onSendReport: (String) -> Unit = {},
     onConfirmReportSent: (String) -> Unit = {},
     onReportNotSent: (String) -> Unit = {},
+    onRemoveTextReport: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val settings = state.settings
@@ -88,9 +89,16 @@ fun DashboardScreen(
     ) {
         if (state.loaded) warnings(state, context, onReconnectListener)
 
-        // Automatic TEXT reports: status only, no action (sent to the destination group automatically).
+        // Automatic TEXT reports: status only, never a Send button (sent to the destination group automatically).
         state.textDeliveries.filter { it.showOnDashboard(now) }.take(3).forEach { delivery ->
-            item(key = "text-${delivery.id}", span = { GridItemSpan(maxLineSpan) }) { AutomaticTextReportCard(delivery) }
+            item(key = "text-${delivery.id}", span = { GridItemSpan(maxLineSpan) }) {
+                AutomaticTextReportCard(
+                    delivery = delivery,
+                    busy = busy,
+                    onRefresh = onCheckReports,
+                    onRemove = { onRemoveTextReport(delivery.id) },
+                )
+            }
         }
 
         // Consolidated PDFs waiting for the operator: "Send as PDF" is the only manual action.

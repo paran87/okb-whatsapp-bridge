@@ -344,6 +344,13 @@ class StatusViewModel(private val container: AppContainer) : ViewModel() {
         refresh()
     }
 
+    /** Dashboard "Remove" on a finished automatic text report card (the phone's copy only). */
+    fun removeTextReport(id: String) {
+        viewModelScope.launch {
+            _events.emit(if (container.textDelivery.remove(id)) "Removed" else "Still being sent; it cannot be removed yet")
+        }
+    }
+
     fun confirmReportSent(id: String) {
         viewModelScope.launch {
             container.consolidatedReports.confirmSent(id)

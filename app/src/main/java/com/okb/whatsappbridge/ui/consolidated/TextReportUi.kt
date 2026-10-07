@@ -34,7 +34,7 @@ fun TextReportDelivery.statusLabel(): Pair<StatusLevel, String> = when (status) 
         if (lastError != null) StatusLevel.WARNING to "Scheduled · retrying" else StatusLevel.INFO to "Scheduled"
     TextDeliveryStatus.SENDING -> StatusLevel.INFO to "Sending"
     TextDeliveryStatus.SENT -> StatusLevel.OK to "Sent"
-    TextDeliveryStatus.FAILED -> StatusLevel.ERROR to "Failed"
+    TextDeliveryStatus.FAILED -> if (isCancelled) StatusLevel.NEUTRAL to "Cancelled" else StatusLevel.ERROR to "Failed"
 }
 
 private val periodDay = DateTimeFormatter.ofPattern("MMM d", Locale.US)
@@ -49,10 +49,16 @@ fun periodLabel(start: String?, end: String?): String? {
 
 /**
  * AUTOMATIC TEXT REPORT: status only. It is sent to the destination group without any operator action, so
- * there is deliberately no Send button.
+ * there is deliberately no Send button. [onRefresh] asks the backend for its current state (e.g. after a Cancel
+ * in the Command Center); [onRemove] clears a finished card from the phone.
  */
 @Composable
-fun AutomaticTextReportCard(delivery: TextReportDelivery) {
+fun AutomaticTextReportCard(
+    delivery: TextReportDelivery,
+    busy: Boolean = false,
+    onRefresh: () -> Unit = {},
+    onRemove: () -> Unit = {},
+) {
     val (level, label) = delivery.statusLabel()
     Panel(title = if (delivery.isTest) "AUTOMATIC TEXT REPORT · TEST" else "AUTOMATIC TEXT REPORT", accent = level.color()) {
         StatusLine("Status", level, label)
@@ -66,15 +72,27 @@ fun AutomaticTextReportCard(delivery: TextReportDelivery) {
             }
             TextDeliveryStatus.SENDING -> Hint("Sending in WhatsApp now. Do not use the phone until it finishes.")
             TextDeliveryStatus.SCHEDULED -> Hint(
-                delivery.lastError?.let { "Last attempt: $it. Retried automatically." }
-                    ?: "Sent automatically; no action needed.",
+                (delivery.lastError?.let { "Last attempt: ${it.trimEnd('.')}. Retried automatically." }
+                    ?: "Sent automatically; no action needed.") +
+                    " To stop it, use Cancel text in the Command Center, then Refresh.",
             )
             TextDeliveryStatus.FAILED -> Hint(
-                "${delivery.lastError ?: "Not sent."} Fix the cause, then use Retry in the Command Center " +
-                    "(Settings → Automated WhatsApp reports → History).",
+                if (delivery.isCancelled) {
+                    "Cancelled in the Command Center; it will not be sent. Remove this card when you no longer need it."
+                } else {
+                    "${delivery.lastError?.trimEnd('.') ?: "Not sent"}. Fix the cause, then use Retry in the Command Center " +
+                        "(Settings → Automated WhatsApp reports → History)."
+                },
             )
         }
         delivery.parts.firstOrNull()?.ref?.let { KeyValueLine("Ref", it) }
+        ButtonRow {
+            OutlinedButton(onClick = onRefresh, enabled = !busy) { Text("Refresh") }
+            // A report still being sent keeps its card (and its duplicate protection) until it is sent or failed.
+            if (delivery.status == TextDeliveryStatus.SENT || delivery.status == TextDeliveryStatus.FAILED) {
+                OutlinedButton(onClick = onRemove) { Text("Remove") }
+            }
+        }
     }
 }
 

@@ -66,6 +66,25 @@ class TextDeliveryUseCaseTest {
             return ApiResult.Success(TextClaimResponse(true, null, job.copy(id = id, attempts = n)), 200)
         }
 
+        /** Backend error message of the main [job] (e.g. "Cancelled from the Command Center"). */
+        var errorMessage: String? = null
+        /** The main [job] was deleted on the backend (404). */
+        var gone = false
+        var statusReads = 0
+
+        override suspend fun getTextDelivery(config: BackendConfig, id: String): ApiResult<TextDeliveryJob> {
+            if (!online) return ApiResult.NetworkError("UnknownHostException")
+            statusReads++
+            if (gone) return ApiResult.HttpError(404, "text delivery not found")
+            return ApiResult.Success(
+                job.copy(
+                    id = id, status = statuses[id] ?: "scheduled", errorMessage = errorMessage,
+                    cancelled = errorMessage == "Cancelled from the Command Center",
+                ),
+                200,
+            )
+        }
+
         override suspend fun reportTextDeliveryResult(config: BackendConfig, id: String, result: TextResultRequest): ApiResult<TextResultResponse> {
             if (!online) return ApiResult.NetworkError("SocketTimeoutException")
             results += result
@@ -271,5 +290,68 @@ class TextDeliveryUseCaseTest {
         useCase(api, retried).process(config, listOf(job.copy(attempts = 0)), null)
         assertTrue(retried.requests.single().pressedRefs.isEmpty())
         assertEquals(TextDeliveryStatus.SENT, repo.get(job.id)!!.status)
+    }
+
+    /** A failed attempt leaves the row SCHEDULED (retried later), like the stuck card on the Dashboard. */
+    private suspend fun retryingRow(api: Api): TextDeliveryUseCase {
+        val uc = useCase(api, Sender(unavailable = "Automatic sending is off"))
+        uc.process(config, listOf(job), null)
+        assertEquals(TextDeliveryStatus.SCHEDULED, repo.get(job.id)!!.status)
+        return uc
+    }
+
+    @Test
+    fun `refresh - a report cancelled in the Command Center shows as Cancelled and can then be removed`() = runTest {
+        val api = Api()
+        val uc = retryingRow(api)
+        assertEquals(false, uc.remove(job.id)) // still scheduled: keeps its row
+        api.status = "failed"
+        api.errorMessage = "Cancelled from the Command Center"
+
+        uc.syncWithBackend(config, offeredIds = emptySet())
+
+        val local = repo.get(job.id)!!
+        assertEquals(TextDeliveryStatus.FAILED, local.status)
+        assertTrue(local.isCancelled)
+        assertTrue(uc.remove(job.id))
+        assertNull(repo.get(job.id))
+    }
+
+    @Test
+    fun `refresh - a report offered in this check is not read again, and offline leaves the row as it is`() = runTest {
+        val api = Api()
+        val uc = retryingRow(api)
+        uc.syncWithBackend(config, offeredIds = setOf(job.id))
+        assertEquals(0, api.statusReads)
+        api.online = false
+        api.status = "failed"
+        uc.syncWithBackend(config, offeredIds = emptySet())
+        assertEquals(TextDeliveryStatus.SCHEDULED, repo.get(job.id)!!.status)
+    }
+
+    @Test
+    fun `refresh - sent elsewhere becomes SENT, deleted on the backend becomes FAILED`() = runTest {
+        val api = Api()
+        val uc = retryingRow(api)
+        api.status = "sent"
+        uc.syncWithBackend(config, emptySet())
+        assertEquals(TextDeliveryStatus.SENT, repo.get(job.id)!!.status)
+
+        repo.update(repo.get(job.id)!!.copy(status = TextDeliveryStatus.SCHEDULED))
+        api.gone = true
+        uc.syncWithBackend(config, emptySet())
+        assertEquals(TextDeliveryStatus.FAILED, repo.get(job.id)!!.status)
+        assertEquals("No longer in the Command Center", repo.get(job.id)!!.lastError)
+    }
+
+    @Test
+    fun `refresh - a retry that is not due yet stays Scheduled with the backend's latest reason`() = runTest {
+        val api = Api()
+        val uc = retryingRow(api)
+        api.errorMessage = "WhatsApp did not come to the foreground"
+        uc.syncWithBackend(config, emptySet())
+        val local = repo.get(job.id)!!
+        assertEquals(TextDeliveryStatus.SCHEDULED, local.status)
+        assertEquals("WhatsApp did not come to the foreground", local.lastError)
     }
 }

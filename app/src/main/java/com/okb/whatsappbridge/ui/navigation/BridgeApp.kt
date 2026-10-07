@@ -213,6 +213,7 @@ fun BridgeApp(container: AppContainer) {
                         onSendReport = { id -> context.startActivity(ShareReportActivity.intent(context, id)) },
                         onConfirmReportSent = statusViewModel::confirmReportSent,
                         onReportNotSent = statusViewModel::markReportNotSent,
+                        onRemoveTextReport = statusViewModel::removeTextReport,
                     )
                 }
                 composable(TopLevel.MESSAGES.route) {

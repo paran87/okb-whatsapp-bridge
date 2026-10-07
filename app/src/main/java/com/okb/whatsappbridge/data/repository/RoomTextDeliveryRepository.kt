@@ -33,6 +33,10 @@ class RoomTextDeliveryRepository(private val dao: TextDeliveryDao) : TextDeliver
 
     override suspend fun withPendingResult(): List<TextReportDelivery> = dao.withPendingResult().map { it.toDomain() }
 
+    override suspend fun open(): List<TextReportDelivery> = dao.open().map { it.toDomain() }
+
+    override suspend fun deleteFinished(id: String): Boolean = dao.deleteFinished(id) > 0
+
     override suspend fun deleteFinishedBefore(before: Long): Int = dao.deleteFinishedBefore(before)
 
     private companion object {

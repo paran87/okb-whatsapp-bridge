@@ -14,6 +14,7 @@ import com.okb.whatsappbridge.data.remote.dto.ConsolidatedDeliveryAckResponse
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueRequest
 import com.okb.whatsappbridge.data.remote.dto.ConsolidatedRunDueResponse
 import com.okb.whatsappbridge.data.remote.dto.TextClaimResponse
+import com.okb.whatsappbridge.data.remote.dto.TextDeliveryJob
 import com.okb.whatsappbridge.data.remote.dto.TextResultRequest
 import com.okb.whatsappbridge.data.remote.dto.TextResultResponse
 import kotlinx.coroutines.Dispatchers
@@ -109,6 +110,14 @@ class OkHttpBridgeApi(
         body = json.encodeToString(ConsolidatedDeliveryAck.serializer(), ConsolidatedDeliveryAck(state, error?.take(300))),
         ConsolidatedDeliveryAckResponse.serializer(),
         ConsolidatedDeliveryAckResponse(),
+    )
+
+    override suspend fun getTextDelivery(config: BackendConfig, id: String): ApiResult<TextDeliveryJob> = execute(
+        config,
+        "api/v1/consolidated-reports/text-deliveries/$id",
+        body = null,
+        TextDeliveryJob.serializer(),
+        TextDeliveryJob(id = id, reportId = "", destinationGroup = "", dedupeKey = ""),
     )
 
     override suspend fun claimTextDelivery(config: BackendConfig, id: String): ApiResult<TextClaimResponse> = execute(
