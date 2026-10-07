@@ -66,6 +66,7 @@ class MonitoringForegroundService : Service() {
 
     override fun onDestroy() {
         container().reportWatcher.stop()
+        container().reportKeepAwake.release()
         super.onDestroy()
     }
 

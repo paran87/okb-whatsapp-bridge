@@ -20,7 +20,9 @@ import java.time.Instant
  * read-only question — whether a report is due or a TEXT / PDF is waiting for this phone, and runs the full
  * report check at once when the answer is yes. Close to a known sending time it waits only until that moment.
  * It also keeps the exact alarm on the next sending time, so an entry added in the Command Center a minute
- * before its time is caught even if the phone dozes. The 15-minute background check stays as the fallback.
+ * before its time is caught even if the phone dozes. A short, renewed partial wake lock keeps the loop running
+ * with the screen off (Android must let the app run in the background: battery "No restrictions"). The
+ * 15-minute background check stays as the fallback.
  */
 class ReportWatcher(
     private val settings: SettingsRepository,
@@ -30,6 +32,8 @@ class ReportWatcher(
     private val runCheck: suspend () -> Unit,
     private val logger: BridgeLogger,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** Called before every poll: keeps the CPU awake so the loop also runs with the screen off. */
+    private val keepAwake: () -> Unit = {},
 ) {
     private var job: Job? = null
     private var lastAlarm: Pair<Long?, Long?>? = null
@@ -41,6 +45,7 @@ class ReportWatcher(
         job = scope.launch {
             logger.info(TAG, "Report watcher started")
             while (isActive) {
+                keepAwake()
                 val wait = try {
                     pollOnce()
                 } catch (e: CancellationException) {

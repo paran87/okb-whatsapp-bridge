@@ -175,6 +175,7 @@ fun DashboardScreen(
                     onOpenAccessibility = { SystemSettingsIntents.openAccessibilitySettings(context) },
                     onOpenAlarms = { SystemSettingsIntents.openExactAlarmSettings(context) },
                     onOpenScreenLock = { SystemSettingsIntents.openScreenLockSettings(context) },
+                    onOpenBattery = { SystemSettingsIntents.openBatteryOptimization(context) },
                     onOpenXiaomiPermissions = if (SystemSettingsIntents.isXiaomi()) {
                         { SystemSettingsIntents.openXiaomiOtherPermissions(context) }
                     } else {

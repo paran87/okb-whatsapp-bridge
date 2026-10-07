@@ -38,6 +38,7 @@ import com.okb.whatsappbridge.util.logging.RoomBridgeLogger
 import com.okb.whatsappbridge.util.security.KeystoreSecretStore
 import com.okb.whatsappbridge.util.media.FileSystemMediaFileStore
 import com.okb.whatsappbridge.util.system.AndroidSystemStatusProvider
+import com.okb.whatsappbridge.util.system.KeepAwake
 import com.okb.whatsappbridge.worker.AlarmReportWakeScheduler
 import com.okb.whatsappbridge.worker.WorkManagerUploadScheduler
 import kotlinx.coroutines.CoroutineScope
@@ -118,8 +119,13 @@ class AppContainer(private val app: Application) {
         )
     }
     /** Polls the backend every ~30 s while monitoring is on, so scheduled reports go out within seconds. */
+    /** CPU wake lock for scheduled reports: renewed by the watcher every poll, so it runs with the screen off. */
+    val reportKeepAwake by lazy { KeepAwake(app, "OKBBridge:reportWatcher") }
     val reportWatcher by lazy {
-        ReportWatcher(settingsRepository, identity, api, reportWakeScheduler, { consolidatedReports() }, logger)
+        ReportWatcher(
+            settingsRepository, identity, api, reportWakeScheduler, { consolidatedReports() }, logger,
+            keepAwake = { reportKeepAwake.renew() },
+        )
     }
     val healthCheck by lazy {
         HealthCheckUseCase(

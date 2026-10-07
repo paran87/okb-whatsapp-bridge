@@ -2,6 +2,7 @@ package com.okb.whatsappbridge.automation
 
 import android.app.KeyguardManager
 import android.content.Context
+import android.os.PowerManager
 import com.okb.whatsappbridge.domain.model.AutomationReadiness
 import com.okb.whatsappbridge.service.WhatsAppAutomationService
 import com.okb.whatsappbridge.worker.AlarmReportWakeScheduler
@@ -17,6 +18,7 @@ object AutomationReadinessProbe {
             secureLockScreen = context.getSystemService(KeyguardManager::class.java)?.isDeviceSecure == true,
             nextCheckAt = next?.first?.takeIf { it > System.currentTimeMillis() },
             nextCheckExact = next?.second == true,
+            backgroundUnrestricted = context.getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(context.packageName) == true,
         )
     }
 }

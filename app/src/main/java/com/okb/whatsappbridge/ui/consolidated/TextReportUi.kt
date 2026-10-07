@@ -1,10 +1,15 @@
 package com.okb.whatsappbridge.ui.consolidated
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.okb.whatsappbridge.domain.model.AutomationReadiness
@@ -100,6 +105,7 @@ fun AutomaticTextReportCard(
  * Checklist for unattended sending (12:00 AM, phone locked, operator asleep). Every item is read from Android;
  * buttons open the matching settings screen. The bridge never changes these settings itself.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AutomaticSendingPanel(
     readiness: AutomationReadiness,
@@ -107,6 +113,7 @@ fun AutomaticSendingPanel(
     onOpenAccessibility: () -> Unit,
     onOpenAlarms: () -> Unit,
     onOpenScreenLock: () -> Unit,
+    onOpenBattery: () -> Unit = {},
     /** Xiaomi/Redmi/POCO only: their extra background-start and lock-screen permissions (not readable by apps). */
     onOpenXiaomiPermissions: (() -> Unit)? = null,
 ) {
@@ -130,6 +137,13 @@ fun AutomaticSendingPanel(
             if (readiness.exactAlarmsAllowed) StatusLevel.OK else StatusLevel.WARNING,
             if (readiness.exactAlarmsAllowed) "Exact" else "Inexact (may be late)",
             readiness.nextCheckAt?.let { "Next check ${Formatters.time(it)} (${if (readiness.nextCheckExact) "exact" else "inexact"})" },
+        )
+        StatusLine(
+            "Background running",
+            if (readiness.backgroundUnrestricted) StatusLevel.OK else StatusLevel.ERROR,
+            if (readiness.backgroundUnrestricted) "Allowed" else "Restricted by battery optimization",
+            if (readiness.backgroundUnrestricted) null
+            else "Reports are late while the screen is off. Battery → No restrictions (or Don't optimize) for OKB Bridge, and keep the phone charging.",
         )
         StatusLine(
             "Screen lock",
@@ -159,13 +173,19 @@ fun AutomaticSendingPanel(
             },
         )
         if (!readiness.ready || onOpenXiaomiPermissions != null) {
-            ButtonRow {
+            // Wraps onto more lines on a phone instead of pushing buttons off screen.
+            FlowRow(
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
                 if (onOpenXiaomiPermissions != null) OutlinedButton(onClick = onOpenXiaomiPermissions) { Text("Xiaomi permissions") }
                 if (!readiness.accessibilityEnabled || !readiness.accessibilityConnected) {
                     OutlinedButton(onClick = onOpenAccessibility) { Text("Accessibility") }
                 }
                 if (!readiness.exactAlarmsAllowed) OutlinedButton(onClick = onOpenAlarms) { Text("Alarms") }
                 if (readiness.secureLockScreen) OutlinedButton(onClick = onOpenScreenLock) { Text("Screen lock") }
+                if (!readiness.backgroundUnrestricted) OutlinedButton(onClick = onOpenBattery) { Text("Battery") }
             }
         }
     }

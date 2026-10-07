@@ -70,6 +70,12 @@ data class AutomationReadiness(
     val secureLockScreen: Boolean = false,
     val nextCheckAt: Long? = null,
     val nextCheckExact: Boolean = false,
+    /**
+     * Exempt from battery optimization (Xiaomi: Battery → No restrictions): the 30-second report check keeps
+     * running with the screen off. Without it Android pauses the app and reports go out late.
+     */
+    val backgroundUnrestricted: Boolean = false,
 ) {
-    val ready: Boolean get() = accessibilityEnabled && accessibilityConnected && exactAlarmsAllowed && !secureLockScreen
+    val ready: Boolean
+        get() = accessibilityEnabled && accessibilityConnected && exactAlarmsAllowed && !secureLockScreen && backgroundUnrestricted
 }
