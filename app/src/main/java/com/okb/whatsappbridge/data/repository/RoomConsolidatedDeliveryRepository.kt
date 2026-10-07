@@ -31,6 +31,9 @@ class RoomConsolidatedDeliveryRepository(private val dao: ConsolidatedDeliveryDa
 
     override suspend fun withPendingAck(): List<ConsolidatedReportDelivery> = dao.withPendingAck().map { it.toDomain() }
 
+    override suspend fun withStatus(status: ConsolidatedDeliveryStatus): List<ConsolidatedReportDelivery> =
+        dao.withStatus(status.name).map { it.toDomain() }
+
     override suspend fun delete(id: String) {
         dao.delete(id)
     }
@@ -44,6 +47,7 @@ private fun ConsolidatedDeliveryEntity.toDomain() = ConsolidatedReportDelivery(
     pdfPath = pdfPath, status = ConsolidatedDeliveryStatus.of(status), errorMessage = errorMessage,
     downloadAttempts = downloadAttempts, pendingAck = pendingAck, pendingAckError = pendingAckError,
     createdAt = createdAt, updatedAt = updatedAt, downloadedAt = downloadedAt, openedAt = openedAt, sentAt = sentAt,
+    autoAttempts = autoAttempts, autoPressed = autoPressed, sentAutomatically = sentAutomatically,
 )
 
 private fun ConsolidatedReportDelivery.toEntity() = ConsolidatedDeliveryEntity(
@@ -52,4 +56,5 @@ private fun ConsolidatedReportDelivery.toEntity() = ConsolidatedDeliveryEntity(
     pdfPath = pdfPath, status = status.name, errorMessage = errorMessage, downloadAttempts = downloadAttempts,
     pendingAck = pendingAck, pendingAckError = pendingAckError, createdAt = createdAt, updatedAt = updatedAt,
     downloadedAt = downloadedAt, openedAt = openedAt, sentAt = sentAt,
+    autoAttempts = autoAttempts, autoPressed = autoPressed, sentAutomatically = sentAutomatically,
 )

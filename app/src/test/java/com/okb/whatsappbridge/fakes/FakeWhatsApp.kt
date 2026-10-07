@@ -18,7 +18,14 @@ class FakeWhatsApp(
 
     class Message(val text: String, var status: String?)
 
-    private enum class Screen { HOME, SEARCH, CHAT, OTHER_APP }
+    private enum class Screen { HOME, SEARCH, CHAT, OTHER_APP, PICKER, PREVIEW, DIALOG }
+
+    /**
+     * How WhatsApp's "Send to" screen (shared PDF) behaves in different versions: tap a row to select it and
+     * press the Send button (then a preview with caption and Send), tap a row and confirm a "Send to …?" dialog,
+     * or tap a row straight into the preview.
+     */
+    enum class PickerMode { SELECT_THEN_SEND, DIALOG, ROW_OPENS_PREVIEW }
 
     val history: MutableMap<String, MutableList<Message>> = chats.associateWith { mutableListOf<Message>() }.toMutableMap()
     private val chatNames = chats.toMutableList()
@@ -55,6 +62,21 @@ class FakeWhatsApp(
     val typedTexts = mutableListOf<String>()
     var sendPresses = 0
 
+    // ---- "Send to" screen (shared PDF) ----
+    var pickerMode = PickerMode.SELECT_THEN_SEND
+    /** Chats listed on the "Send to" screen before searching (null = all). */
+    var pickerVisibleChats: List<String>? = null
+    /** After the final Send WhatsApp returns to the app that shared the file instead of opening the chat. */
+    var returnToCallerAfterSend = false
+    /** The final Send press (the one that sends the PDF) does nothing. */
+    var finalSendIgnored = false
+    var shareWorks = true
+    val shares = mutableListOf<String>()
+    private var sharedFile: String? = null
+    private var sharedCaption = ""
+    private var pickerQuery: String? = null
+    private var selected: String? = null
+
     fun messagesIn(chat: String): List<String> = history[chat].orEmpty().map { it.text }
 
     fun addMessage(chat: String, text: String, status: String? = "Read") {
@@ -81,10 +103,25 @@ class FakeWhatsApp(
     override fun back(): Boolean {
         screen = when (screen) {
             Screen.CHAT, Screen.SEARCH -> Screen.HOME
+            Screen.PICKER, Screen.PREVIEW, Screen.DIALOG -> Screen.OTHER_APP
             else -> screen
         }
         return true
     }
+
+    override fun shareFile(packageName: String, file: java.io.File, caption: String): Boolean {
+        if (!shareWorks || packageName != pkg) return false
+        shares += file.name
+        sharedFile = file.name
+        sharedCaption = caption
+        pickerQuery = null
+        selected = null
+        screen = Screen.PICKER
+        return true
+    }
+
+    /** Messages in a chat that are the shared PDF (by file name). */
+    fun documentsIn(chat: String): List<String> = history[chat].orEmpty().map { it.text }.filter { it.endsWith(".pdf") }
 
     override fun home(): Boolean {
         screen = Screen.OTHER_APP
@@ -104,6 +141,60 @@ class FakeWhatsApp(
                 else chatNames.filter { it.contains(searchQuery.trim(), ignoreCase = true) }.map(::chatRow)),
         ))
         Screen.CHAT -> chatScreen(openChat!!)
+        Screen.PICKER -> pickerScreen()
+        Screen.PREVIEW -> node("android.widget.FrameLayout", children = listOf(
+            node("android.widget.TextView", id = "document_name", text = sharedFile),
+            node("android.widget.EditText", id = "caption", text = sharedCaption, editable = true, onSetText = { sharedCaption = it; true }),
+            node("android.widget.TextView", id = "recipients", text = selected),
+            node("android.widget.ImageButton", id = "send", desc = "Send", onClick = { finalSend(); true }),
+        ))
+        Screen.DIALOG -> node("android.widget.FrameLayout", children = listOf(
+            FakeNode("android.widget.TextView", "android:id/message", "Send to $selected?", null, false, false, emptyList(), null, null, null),
+            FakeNode("android.widget.Button", "android:id/button2", "CANCEL", null, false, true, emptyList(), { screen = Screen.PICKER; true }, null, null),
+            FakeNode("android.widget.Button", "android:id/button1", "SEND", null, false, true, emptyList(), { finalSend(); true }, null, null),
+        ))
+    }
+
+    private fun pickerScreen(): FakeNode {
+        val query = pickerQuery
+        val listed = when {
+            query != null -> if (query.isBlank()) emptyList() else chatNames.filter { it.contains(query.trim(), ignoreCase = true) }
+            else -> pickerVisibleChats ?: chatNames
+        }
+        val rows = listed.map { name ->
+            node("android.widget.RelativeLayout", clickable = true, onClick = {
+                when (pickerMode) {
+                    PickerMode.SELECT_THEN_SEND -> selected = name
+                    PickerMode.DIALOG -> { selected = name; screen = Screen.DIALOG }
+                    PickerMode.ROW_OPENS_PREVIEW -> { selected = name; screen = Screen.PREVIEW }
+                }
+                true
+            }, children = listOf(node("android.widget.TextView", id = "contactpicker_row_name", text = name)))
+        }
+        return node("android.widget.FrameLayout", children = listOfNotNull(
+            node("android.widget.TextView", id = "toolbar_title", text = "Send to…"),
+            if (query == null) node("android.widget.ImageButton", id = "menuitem_search", desc = "Search", onClick = { pickerQuery = ""; true })
+            else node("android.widget.EditText", id = "search_src_text", text = query, editable = true, onSetText = { pickerQuery = it; true }),
+            node("androidx.recyclerview.widget.RecyclerView", id = "list", children = rows),
+            selected?.takeIf { pickerMode == PickerMode.SELECT_THEN_SEND }?.let {
+                node("android.widget.ImageButton", id = "send", desc = "Send", onClick = { screen = Screen.PREVIEW; true })
+            },
+        ))
+    }
+
+    /** The press that sends the PDF to the selected chat. */
+    private fun finalSend() {
+        sendPresses++
+        if (finalSendIgnored) return
+        val chat = selected ?: return
+        history.getOrPut(chat) { mutableListOf() }.add(Message(sharedFile!!, newMessageStatus))
+        if (returnToCallerAfterSend) {
+            screen = Screen.OTHER_APP
+        } else {
+            openChat = chat
+            scrollBack = 0
+            screen = Screen.CHAT
+        }
     }
 
     private fun chatRow(name: String): FakeNode {

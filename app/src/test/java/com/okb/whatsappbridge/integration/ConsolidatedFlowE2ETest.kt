@@ -13,6 +13,11 @@ import com.okb.whatsappbridge.domain.model.ConsolidatedDeliveryStatus
 import com.okb.whatsappbridge.domain.usecase.BackendUseCases
 import com.okb.whatsappbridge.domain.usecase.ConsolidatedReportCheckUseCase
 import com.okb.whatsappbridge.domain.usecase.DeviceInfo
+import com.okb.whatsappbridge.automation.PdfSendProgress
+import com.okb.whatsappbridge.automation.PdfSendRequest
+import com.okb.whatsappbridge.automation.SendOutcome
+import com.okb.whatsappbridge.automation.WhatsAppPdfSender
+import com.okb.whatsappbridge.domain.usecase.AutomaticPdfSender
 import com.okb.whatsappbridge.domain.usecase.AutomaticTextSender
 import com.okb.whatsappbridge.domain.usecase.ProcessingOutcome
 import com.okb.whatsappbridge.domain.usecase.TextDeliveryUseCase
@@ -29,6 +34,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -112,9 +118,13 @@ class ConsolidatedFlowE2ETest {
     private fun notification(group: String, text: String) =
         Snapshots.groupMessaging(group = group, messages = listOf(SnapshotMessage(text, System.currentTimeMillis(), "Field Engineer")))
 
-    @Test
-    fun `source group report to automatic TEXT in the destination group and a manual PDF`() = runBlocking {
-        assumeTrue("set OKB_E2E_BACKEND_URL to run against a backend", backendUrl != null)
+    private class Phone(val base: String, val context: Application, val api: OkHttpBridgeApi, val bridge: TestBridge)
+
+    /**
+     * Phone and Command Center set up, a field report captured and processed, one schedule entry per [types],
+     * and the clock moved past the sending time.
+     */
+    private suspend fun setUp(types: List<String>): Phone {
         val base = backendUrl!!
         val context = ApplicationProvider.getApplicationContext<Application>()
         val api = OkHttpBridgeApi()
@@ -137,8 +147,8 @@ class ConsolidatedFlowE2ETest {
         call("PUT", "$base/api/v1/consolidated-reports/settings", """{"settings":{"enabled":true}}""", admin = true)
         val start = java.time.Instant.now().minusSeconds(60).truncatedTo(java.time.temporal.ChronoUnit.SECONDS)
         val end = start.plusSeconds(16 * 60)
-        // The same period twice: once sent as TEXT (automatic), once as PDF (manual, from the phone).
-        for (type in listOf("TEXT", "PDF")) {
+        // One entry per type for the same period (e.g. once sent as TEXT, once as PDF).
+        for (type in types) {
             call("POST", "$base/api/v1/consolidated-reports/schedules", """{"periodStart":"$start","periodEnd":"$end","sendAt":"$end","deliveryType":"$type"}""", admin = true)
         }
         Thread.sleep(1_100) // message times are whole seconds: the report must come after the moment it was enabled
@@ -163,6 +173,17 @@ class ConsolidatedFlowE2ETest {
 
         // TEST 4: the sending time passes → the phone's periodic check makes the backend prepare the report.
         call("POST", "$controlUrl/offset?minutes=16")
+        return Phone(base, context, api, bridge)
+    }
+
+    @Test
+    fun `source group report to automatic TEXT in the destination group and a manual PDF`() = runBlocking {
+        assumeTrue("set OKB_E2E_BACKEND_URL to run against a backend", backendUrl != null)
+        val phone = setUp(listOf("TEXT", "PDF"))
+        val base = phone.base
+        val context = phone.context
+        val api = phone.api
+        val bridge = phone.bridge
         val dir = File(context.filesDir, "consolidated-e2e").apply { deleteRecursively() }
         val deliveries = RoomConsolidatedDeliveryRepository(bridge.db.consolidatedDeliveryDao())
         val notified = mutableListOf<String>()
@@ -236,5 +257,54 @@ class ConsolidatedFlowE2ETest {
         assertEquals(source, row["sourceGroup"]!!.jsonPrimitive.content)
         assertTrue(row["pdfDelivery"] !is JsonObject)
         assertTrue(historyRow(base, "PDF")["textDelivery"] !is JsonObject)
+    }
+
+    @Test
+    fun `a PDF entry is sent automatically into the destination group and recorded as sent`() = runBlocking {
+        assumeTrue("set OKB_E2E_BACKEND_URL to run against a backend", backendUrl != null)
+        val phone = setUp(listOf("PDF"))
+        val dir = File(phone.context.filesDir, "consolidated-e2e-auto").apply { deleteRecursively() }
+        val deliveries = RoomConsolidatedDeliveryRepository(phone.bridge.db.consolidatedDeliveryDao())
+        val notified = mutableListOf<String>()
+        val whatsApp = FakeWhatsApp(listOf("Barkada Chat", source, destination)).apply { pickerVisibleChats = listOf("Barkada Chat") }
+        var virtualTime = 0L
+        var failNext = true
+        val pdfSender = object : AutomaticPdfSender {
+            override fun unavailableReason(): String? = null
+            override suspend fun send(request: PdfSendRequest, progress: PdfSendProgress): SendOutcome {
+                // First attempt: WhatsApp is not usable (e.g. a pop-up covers it); the next check sends it.
+                if (failNext) { failNext = false; return SendOutcome.Failed("WhatsApp did not come to the foreground") }
+                return WhatsAppPdfSender(whatsApp, sleep = { virtualTime += it }, clock = { virtualTime }).send(whatsApp.pkg, request, progress)
+            }
+        }
+        val check = ConsolidatedReportCheckUseCase(
+            phone.bridge.settings, phone.bridge.identity, phone.api, deliveries, dir, { d, _ -> notified += d.id; true }, phone.bridge.logger,
+            pdfSender = pdfSender,
+        )
+        val first = check()
+        assertEquals(null, first.error)
+        assertEquals(1, first.newlyReady)
+        assertEquals(0, first.pdfSent)
+        val id = deliveries.observeRecent().first().single().id
+        // The operator is told why and can send it by hand; the Command Center shows the same reason.
+        assertEquals(listOf(id), notified)
+        val failed = historyRow(phone.base, "PDF")["pdfDelivery"]!!.jsonObject
+        assertEquals("notified", failed["status"]!!.jsonPrimitive.content)
+        assertTrue(failed["errorMessage"]!!.jsonPrimitive.content.contains("WhatsApp did not come to the foreground"))
+
+        val second = check()
+        assertEquals(1, second.pdfSent)
+        val row = deliveries.get(id)!!
+        assertEquals(ConsolidatedDeliveryStatus.SENT, row.status)
+        assertTrue(row.sentAutomatically)
+        assertEquals(listOf(row.fileName), whatsApp.documentsIn(destination))
+        assertTrue(whatsApp.documentsIn(source).isEmpty())
+        val sent = historyRow(phone.base, "PDF")["pdfDelivery"]!!.jsonObject
+        assertEquals("sent", sent["status"]!!.jsonPrimitive.content)
+        assertTrue(sent["errorMessage"] !is kotlinx.serialization.json.JsonPrimitive || sent["errorMessage"]!!.jsonPrimitive.contentOrNull == null)
+
+        // Never twice: later checks send nothing more.
+        assertEquals(0, check().pdfSent)
+        assertEquals(1, whatsApp.documentsIn(destination).size)
     }
 }

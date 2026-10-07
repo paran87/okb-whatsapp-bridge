@@ -3,6 +3,7 @@ package com.okb.whatsappbridge.service
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
+import android.content.ClipData
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -11,6 +12,7 @@ import android.provider.Settings
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import androidx.core.content.FileProvider
 import com.okb.whatsappbridge.OkbBridgeApplication
 import com.okb.whatsappbridge.automation.AccessibilityUiNode
 import com.okb.whatsappbridge.automation.UiNode
@@ -19,13 +21,14 @@ import com.okb.whatsappbridge.whatsapp.WhatsAppPackages
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
+import java.io.File
 import kotlin.coroutines.resume
 
 /**
- * Accessibility service used ONLY to send the automatic consolidated TEXT report into the configured WhatsApp
- * destination group (see WhatsAppTextSender). It is limited to the WhatsApp packages (accessibility config),
- * reads no events, collects nothing and does nothing unless a TEXT delivery is being sent. The operator enables
- * it once in Android Settings → Accessibility → OKB WhatsApp Bridge.
+ * Accessibility service used ONLY to send the automatic consolidated reports (TEXT and PDF) into the configured
+ * WhatsApp destination group (see WhatsAppTextSender, WhatsAppPdfSender). It is limited to the WhatsApp packages
+ * (accessibility config), reads no events, collects nothing and does nothing unless a report is being sent. The
+ * operator enables it once in Android Settings → Accessibility → OKB WhatsApp Bridge.
  */
 class WhatsAppAutomationService : AccessibilityService(), WhatsAppUi {
 
@@ -77,6 +80,21 @@ class WhatsAppAutomationService : AccessibilityService(), WhatsAppUi {
         } catch (_: RuntimeException) {
             false
         }
+    }
+
+    override fun shareFile(packageName: String, file: File, caption: String): Boolean = try {
+        val uri = FileProvider.getUriForFile(this, "${this.packageName}.fileprovider", file)
+        val share = Intent(Intent.ACTION_SEND)
+            .setType("application/pdf")
+            .setPackage(packageName)
+            .putExtra(Intent.EXTRA_STREAM, uri)
+            .putExtra(Intent.EXTRA_TEXT, caption)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        share.clipData = ClipData.newRawUri(file.name, uri)
+        startActivity(share)
+        true
+    } catch (_: RuntimeException) {
+        false
     }
 
     override fun back(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)

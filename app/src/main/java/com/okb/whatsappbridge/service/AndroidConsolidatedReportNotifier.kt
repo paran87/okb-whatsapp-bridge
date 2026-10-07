@@ -18,8 +18,9 @@ import com.okb.whatsappbridge.ui.consolidated.ShareReportActivity
 import java.io.File
 
 /**
- * "Consolidated PDF Ready" notification (manual PDF delivery). Tapping it opens WhatsApp's share screen
- * (ShareReportActivity). The TEXT report needs no notification: it is sent automatically.
+ * "Consolidated PDF Ready" notification, shown only when the PDF could not be sent automatically (the reason is
+ * in the text). Tapping it opens WhatsApp's share screen (ShareReportActivity). It is removed when a later
+ * automatic attempt sends the PDF. The TEXT report needs no notification.
  */
 class AndroidConsolidatedReportNotifier(private val context: Context) : ConsolidatedReportSink {
 
@@ -27,7 +28,8 @@ class AndroidConsolidatedReportNotifier(private val context: Context) : Consolid
         if (!canPost()) return false
         ensureChannel()
         val title = if (delivery.isTest) "📄 TEST PDF ready" else "📄 Consolidated PDF Ready"
-        val text = "Tap to send as PDF: " + shareInstruction(delivery.destinationGroup)
+        val problem = delivery.errorMessage?.takeIf { it.isNotBlank() }
+        val text = listOfNotNull(problem, "Tap to send as PDF: " + shareInstruction(delivery.destinationGroup)).joinToString(" ")
         val period = delivery.caption.lineSequence()
             .dropWhile { !it.startsWith("Reporting Period") }.drop(1).takeWhile { it.isNotBlank() }.joinToString(" ")
         val intent = PendingIntent.getActivity(
@@ -54,6 +56,8 @@ class AndroidConsolidatedReportNotifier(private val context: Context) : Consolid
             false
         }
     }
+
+    override fun reportSent(delivery: ConsolidatedReportDelivery) = cancel(context, delivery.id)
 
     private fun canPost(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&

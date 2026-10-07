@@ -18,7 +18,12 @@ import com.okb.whatsappbridge.data.remote.dto.TextDeliveryJob
 import com.okb.whatsappbridge.data.remote.dto.TextMessagePart
 import com.okb.whatsappbridge.data.remote.dto.TextResultRequest
 import com.okb.whatsappbridge.data.remote.dto.TextResultResponse
+import com.okb.whatsappbridge.automation.PdfSendProgress
+import com.okb.whatsappbridge.automation.PdfSendRequest
+import com.okb.whatsappbridge.domain.model.ConsolidatedReportDelivery
+import com.okb.whatsappbridge.domain.usecase.AutomaticPdfSender
 import com.okb.whatsappbridge.domain.usecase.AutomaticTextSender
+import com.okb.whatsappbridge.domain.usecase.ConsolidatedReportSink
 import com.okb.whatsappbridge.domain.usecase.ConsolidatedReportCheckUseCase
 import com.okb.whatsappbridge.domain.usecase.ReportWakeScheduler
 import com.okb.whatsappbridge.domain.usecase.TextDeliveryUseCase
@@ -341,5 +346,161 @@ class ConsolidatedReportCheckUseCaseTest {
         api.deliveries = emptyList()
         uc.remove(remote.id) // still removable
         assertNull(repo.get(remote.id))
+    }
+
+    // ---- automatic PDF sending ------------------------------------------------------------------------------
+
+    private var clockNow = 1_000_000L
+    private val sentCancelled = mutableListOf<String>()
+
+    private class PdfSender : AutomaticPdfSender {
+        var unavailable: String? = null
+        val outcomes = ArrayDeque<SendOutcome>()
+        val requests = mutableListOf<PdfSendRequest>()
+        var pressBeforeOutcome = false
+        override fun unavailableReason() = unavailable
+        override suspend fun send(request: PdfSendRequest, progress: PdfSendProgress): SendOutcome {
+            requests += request
+            if (pressBeforeOutcome) progress.beforePressSend()
+            return outcomes.removeFirstOrNull() ?: SendOutcome.Sent("${request.fileName} visible")
+        }
+    }
+
+    private fun autoUseCase(api: BridgeApi, sender: PdfSender) = ConsolidatedReportCheckUseCase(
+        settings, SecureDeviceIdentityRepository(InMemorySecretStore()), api, repo, tmp.root,
+        object : ConsolidatedReportSink {
+            override fun reportReady(delivery: ConsolidatedReportDelivery, pdf: File): Boolean {
+                notified += delivery.id
+                return true
+            }
+            override fun reportSent(delivery: ConsolidatedReportDelivery) { sentCancelled += delivery.id }
+        },
+        RecordingLogger(),
+        clock = { clockNow },
+        wakeScheduler = wakeScheduler,
+        pdfSender = sender,
+    )
+
+    @Test
+    fun `the PDF is sent automatically - no notification, the backend is told it was sent`() = runTest {
+        val api = Api(listOf(remote))
+        val sender = PdfSender()
+        val result = autoUseCase(api, sender)()
+        assertEquals(1, result.pdfSent)
+        val row = repo.get(remote.id)!!
+        assertEquals(ConsolidatedDeliveryStatus.SENT, row.status)
+        assertTrue(row.sentAutomatically)
+        assertTrue(notified.isEmpty())
+        assertEquals(listOf(remote.id to "notified", remote.id to "sent"), api.acks)
+        val request = sender.requests.single()
+        assertEquals("OKB COMMAND CENTER", request.destinationGroup)
+        assertEquals("NMDEO FLOOD MONITORING", request.sourceGroup)
+        assertEquals(remote.fileName, request.fileName)
+        assertTrue(ConsolidatedReportCheckUseCase.isPdf(request.file))
+        assertFalse(request.pressedEarlier)
+    }
+
+    @Test
+    fun `a failed automatic send notifies the operator with the reason and is retried two minutes later`() = runTest {
+        val api = Api(listOf(remote))
+        val sender = PdfSender().apply { outcomes += SendOutcome.Failed("WhatsApp search was not found") }
+        val uc = autoUseCase(api, sender)
+        uc()
+        var row = repo.get(remote.id)!!
+        assertEquals(ConsolidatedDeliveryStatus.READY_FOR_WHATSAPP, row.status)
+        assertEquals(1, row.autoAttempts)
+        assertTrue(row.errorMessage!!.startsWith("Not sent automatically: WhatsApp search was not found"))
+        assertEquals(listOf(remote.id), notified)
+        assertEquals(row.errorMessage, api.ackErrors.last())
+        val retryAt = clockNow + ConsolidatedReportCheckUseCase.AUTO_RETRY_MILLIS
+        assertEquals(retryAt, uc.nextAutoRetryAt())
+        assertEquals("next null $retryAt", wakes.last())
+
+        api.deliveries = emptyList() // the backend has it as "notified" now
+        clockNow = retryAt
+        val result = uc()
+        assertEquals(1, result.pdfSent)
+        row = repo.get(remote.id)!!
+        assertEquals(ConsolidatedDeliveryStatus.SENT, row.status)
+        assertEquals(listOf(remote.id), sentCancelled) // the "PDF Ready" notification is removed
+        assertNull(uc.nextAutoRetryAt())
+    }
+
+    @Test
+    fun `after three failed automatic attempts the PDF is left to the operator`() = runTest {
+        val api = Api(listOf(remote))
+        val sender = PdfSender().apply { repeat(5) { outcomes += SendOutcome.Failed("WhatsApp did not come to the foreground") } }
+        val uc = autoUseCase(api, sender)
+        repeat(5) {
+            uc()
+            clockNow += ConsolidatedReportCheckUseCase.AUTO_RETRY_MILLIS
+        }
+        assertEquals(3, sender.requests.size)
+        val row = repo.get(remote.id)!!
+        assertEquals(ConsolidatedDeliveryStatus.READY_FOR_WHATSAPP, row.status)
+        assertFalse(row.errorMessage!!.contains("tried again"))
+        assertNull(uc.nextAutoRetryAt())
+    }
+
+    @Test
+    fun `an attempt that pressed Send without confirming makes the next one only check the chat`() = runTest {
+        val api = Api(listOf(remote))
+        val sender = PdfSender().apply {
+            pressBeforeOutcome = true
+            outcomes += SendOutcome.Failed("WhatsApp stopped on an unexpected screen after Send")
+        }
+        val uc = autoUseCase(api, sender)
+        uc()
+        assertTrue(repo.get(remote.id)!!.autoPressed)
+        clockNow += ConsolidatedReportCheckUseCase.AUTO_RETRY_MILLIS
+        uc()
+        assertEquals(listOf(false, true), sender.requests.map { it.pressedEarlier })
+        assertEquals(ConsolidatedDeliveryStatus.SENT, repo.get(remote.id)!!.status)
+    }
+
+    @Test
+    fun `a failure another attempt cannot fix stops automatic sending at once`() = runTest {
+        val api = Api(listOf(remote))
+        val sender = PdfSender().apply { outcomes += SendOutcome.Failed("The destination group is the source group; refusing to send", retryable = false) }
+        val uc = autoUseCase(api, sender)
+        uc()
+        clockNow += ConsolidatedReportCheckUseCase.AUTO_RETRY_MILLIS
+        uc()
+        assertEquals(1, sender.requests.size)
+        assertEquals(ConsolidatedReportCheckUseCase.MAX_AUTO_ATTEMPTS, repo.get(remote.id)!!.autoAttempts)
+        assertEquals(listOf(remote.id), notified)
+    }
+
+    @Test
+    fun `automatic sending switched off - the operator is notified once, and it is sent once the service is back`() = runTest {
+        val api = Api(listOf(remote))
+        val sender = PdfSender().apply { unavailable = "Automatic sending is off: enable OKB WhatsApp Bridge in Android Settings → Accessibility" }
+        val uc = autoUseCase(api, sender)
+        uc()
+        api.deliveries = emptyList()
+        uc()
+        assertEquals(listOf(remote.id), notified)
+        assertTrue(sender.requests.isEmpty())
+        val row = repo.get(remote.id)!!
+        assertEquals(0, row.autoAttempts)
+        assertTrue(row.errorMessage!!.contains("Accessibility"))
+
+        sender.unavailable = null
+        uc()
+        assertEquals(ConsolidatedDeliveryStatus.SENT, repo.get(remote.id)!!.status)
+    }
+
+    @Test
+    fun `once the operator opens the share screen the PDF is never sent automatically`() = runTest {
+        val api = Api(listOf(remote))
+        val sender = PdfSender().apply { outcomes += SendOutcome.Failed("WhatsApp search was not found") }
+        val uc = autoUseCase(api, sender)
+        uc()
+        uc.markOpened(remote.id)
+        uc.markNotSent(remote.id)
+        clockNow += ConsolidatedReportCheckUseCase.AUTO_RETRY_MILLIS
+        uc()
+        assertEquals(1, sender.requests.size)
+        assertEquals(ConsolidatedDeliveryStatus.READY_FOR_WHATSAPP, repo.get(remote.id)!!.status)
     }
 }

@@ -4,6 +4,7 @@ import android.app.KeyguardManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.PowerManager
+import com.okb.whatsappbridge.domain.usecase.AutomaticPdfSender
 import com.okb.whatsappbridge.domain.usecase.AutomaticTextSender
 import com.okb.whatsappbridge.service.WhatsAppAutomationService
 import com.okb.whatsappbridge.util.logging.BridgeLogger
@@ -15,11 +16,11 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * Automatic TEXT sending on the dedicated bridge phone:
+ * Automatic TEXT and PDF sending on the dedicated bridge phone:
  *
  *   wake the screen (wake lock) → dismiss a non-secure lock screen (UnlockActivity, else a swipe-up gesture;
  *   see ScreenUnlocker) → drive WhatsApp through the
- *   accessibility service (WhatsAppTextSender) → go back to the home screen → turn the screen off again if it was
+ *   accessibility service (WhatsAppTextSender, or WhatsAppPdfSender for the PDF) → go back to the home screen → turn the screen off again if it was
  *   off → release the wake lock.
  *
  * Requirements on the phone (shown in the app's "Automatic text reports" checklist): the OKB accessibility
@@ -29,7 +30,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 class AndroidAutomaticTextSender(
     private val context: Context,
     private val logger: BridgeLogger,
-) : AutomaticTextSender {
+) : AutomaticTextSender, AutomaticPdfSender {
 
     override fun unavailableReason(): String? {
         if (whatsAppPackage() == null) return "WhatsApp is not installed on the bridge phone"
@@ -43,7 +44,19 @@ class AndroidAutomaticTextSender(
         return null
     }
 
-    override suspend fun send(request: TextSendRequest, progress: SendProgress): SendOutcome = withContext(Dispatchers.Default) {
+    override suspend fun send(request: TextSendRequest, progress: SendProgress): SendOutcome = onScreen { service, pkg ->
+        WhatsAppTextSender(service, log = { logger.info(TAG, it) }).send(pkg, request, progress)
+    }
+
+    /** The consolidated PDF, through WhatsApp's own "Send to" screen (see WhatsAppPdfSender). */
+    override suspend fun send(request: PdfSendRequest, progress: PdfSendProgress): SendOutcome = onScreen { service, pkg ->
+        WhatsAppPdfSender(service, log = { logger.info(PDF_TAG, it) }).send(pkg, request, progress)
+    }
+
+    /** Wakes and unlocks the phone, runs [block] against WhatsApp, then leaves WhatsApp and restores the screen. */
+    private suspend fun onScreen(
+        block: suspend (WhatsAppAutomationService, String) -> SendOutcome,
+    ): SendOutcome = withContext(Dispatchers.Default) {
         val service = WhatsAppAutomationService.connected.value
             ?: return@withContext SendOutcome.Failed(unavailableReason() ?: "Automatic sending service not running")
         val pkg = whatsAppPackage() ?: return@withContext SendOutcome.Failed("WhatsApp is not installed on the bridge phone")
@@ -64,9 +77,7 @@ class AndroidAutomaticTextSender(
             )
             unlocker.unlock()?.let { return@withContext SendOutcome.Failed(it) }
             delay(SETTLE_MS)
-            withTimeoutOrNull(SEND_TIMEOUT_MS) {
-                WhatsAppTextSender(service, log = { logger.info(TAG, it) }).send(pkg, request, progress)
-            } ?: SendOutcome.Failed("Automatic sending timed out")
+            withTimeoutOrNull(SEND_TIMEOUT_MS) { block(service, pkg) } ?: SendOutcome.Failed("Automatic sending timed out")
         } finally {
             // Also after a timeout or cancellation: leave WhatsApp, turn the screen off again, release the lock.
             withContext(NonCancellable) {
@@ -101,6 +112,7 @@ class AndroidAutomaticTextSender(
 
     private companion object {
         const val TAG = "TextReport"
+        const val PDF_TAG = "Delivery"
         const val SETTLE_MS = 700L
         const val SEND_TIMEOUT_MS = 4L * 60 * 1000
     }

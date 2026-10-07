@@ -1,5 +1,8 @@
 package com.okb.whatsappbridge.domain.usecase
 
+import com.okb.whatsappbridge.automation.PdfSendProgress
+import com.okb.whatsappbridge.automation.PdfSendRequest
+import com.okb.whatsappbridge.automation.SendOutcome
 import com.okb.whatsappbridge.data.remote.api.ApiResult
 import com.okb.whatsappbridge.data.remote.api.BackendConfig
 import com.okb.whatsappbridge.data.remote.api.BridgeApi
@@ -23,8 +26,22 @@ import java.io.File
 
 /** Shows the operator a "report ready" notification that opens the one-tap WhatsApp share. */
 fun interface ConsolidatedReportSink {
-    /** @return true when the notification was posted (notifications allowed). */
+    /**
+     * The PDF needs the operator: automatic sending is not possible or failed ([ConsolidatedReportDelivery.errorMessage]
+     * says why). @return true when the notification was posted (notifications allowed).
+     */
     fun reportReady(delivery: ConsolidatedReportDelivery, pdf: File): Boolean
+
+    /** The PDF was sent automatically: an earlier "PDF Ready" notification is no longer needed. */
+    fun reportSent(delivery: ConsolidatedReportDelivery) {}
+}
+
+/** Sends a consolidated PDF into WhatsApp on this phone (accessibility automation; see AndroidAutomaticTextSender). */
+interface AutomaticPdfSender {
+    /** Why automatic sending cannot run right now (e.g. the accessibility service is off), or null when it can. */
+    fun unavailableReason(): String?
+
+    suspend fun send(request: PdfSendRequest, progress: PdfSendProgress): SendOutcome
 }
 
 data class ConsolidatedCheckResult(
@@ -33,6 +50,7 @@ data class ConsolidatedCheckResult(
     val error: String? = null,
     val textSent: Int = 0,
     val textFailed: Int = 0,
+    val pdfSent: Int = 0,
 )
 
 /** Wakes the phone for the next consolidated-report check (exact alarm on Android; see AlarmReportWakeScheduler). */
@@ -52,14 +70,18 @@ data class ShareTarget(val delivery: ConsolidatedReportDelivery, val file: File)
  *
  *  - TEXT reports: sent AUTOMATICALLY to the destination group by [textDelivery] (no operator action). They are
  *    handled first because they are time-critical (e.g. the 12:00 AM report while the operator sleeps).
- *  - PDF reports: MANUAL. This class brings the PDF to the phone and keeps a local delivery queue (Room) so
- *    nothing is downloaded or offered twice and nothing is lost while offline:
+ *  - PDF reports: also sent AUTOMATICALLY when [pdfSender] can run (WhatsApp's "Send to" screen driven by the
+ *    accessibility service). This class brings the PDF to the phone and keeps a local delivery queue (Room) so
+ *    nothing is downloaded, offered or sent twice and nothing is lost while offline:
  *
- *   READY_TO_SEND → DOWNLOADING → READY_FOR_WHATSAPP → OPENED_IN_WHATSAPP → SENT (operator confirms)
- *                                        ↑__________ not sent __________|        FAILED (download failed)
+ *   READY_TO_SEND → DOWNLOADING → READY_FOR_WHATSAPP → SENT (sent automatically, or confirmed by the operator)
+ *                                        ↓     ↑ not sent                 FAILED (download failed)
+ *                                   OPENED_IN_WHATSAPP (manual "Send as PDF")
  *
- *    The operator taps "Send as PDF", selects the DESTINATION group in WhatsApp's share screen and presses
- *    Send, then confirms in the app. Opening the share screen is never treated as "sent".
+ *    A PDF that cannot be sent automatically (service off, WhatsApp changed, [MAX_AUTO_ATTEMPTS] failures, or an
+ *    unconfirmed earlier Send) gets the "PDF Ready" notification: the operator taps "Send as PDF", selects the
+ *    DESTINATION group in WhatsApp's share screen and presses Send, then confirms in the app. Opening the share
+ *    screen is never treated as "sent".
  *
  * Runs from the 15-minute periodic check and from an exact alarm set just after each scheduled cut-off
  * ([wakeScheduler]); the backend decides whether a report is due.
@@ -75,6 +97,7 @@ class ConsolidatedReportCheckUseCase(
     private val clock: () -> Long = System::currentTimeMillis,
     private val textDelivery: TextDeliveryUseCase? = null,
     private val wakeScheduler: ReportWakeScheduler? = null,
+    private val pdfSender: AutomaticPdfSender? = null,
 ) {
 
     /** One check at a time: the cut-off alarm, the 15-minute worker and "Check now" may overlap. */
@@ -122,10 +145,111 @@ class ConsolidatedReportCheckUseCase(
         for (remote in response.deliveries) {
             if (process(config, remote)) newlyReady++
         }
+        val pdfSent = autoSendPdfs(config, current.destinationGroupName, current.sourceGroupName)
         housekeeping()
-        wakeScheduler?.scheduleNext(epochMillis(response.nextCutoffAt), epochMillis(response.nextRetryAt))
-        return ConsolidatedCheckResult(newlyReady, response.warning, textSent = text.sent, textFailed = text.failed)
+        val retryAt = listOfNotNull(epochMillis(response.nextRetryAt), nextAutoRetryAt()).minOrNull()
+        wakeScheduler?.scheduleNext(epochMillis(response.nextCutoffAt), retryAt)
+        return ConsolidatedCheckResult(newlyReady, response.warning, textSent = text.sent, textFailed = text.failed, pdfSent = pdfSent)
     }
+
+    // ---- automatic PDF sending ------------------------------------------------------------------------------
+
+    /** Sends the PDFs waiting on this phone, oldest first. Returns how many were sent. */
+    private suspend fun autoSendPdfs(config: BackendConfig, settingsDestination: String, sourceGroup: String): Int {
+        val sender = pdfSender ?: return 0
+        var sent = 0
+        for (delivery in deliveries.withStatus(READY_FOR_WHATSAPP)) {
+            if (delivery.autoAttempts >= MAX_AUTO_ATTEMPTS) continue
+            if (autoSend(config, sender, delivery, settingsDestination, sourceGroup)) sent++
+        }
+        return sent
+    }
+
+    private suspend fun autoSend(
+        config: BackendConfig,
+        sender: AutomaticPdfSender,
+        waiting: ConsolidatedReportDelivery,
+        settingsDestination: String,
+        sourceGroup: String,
+    ): Boolean {
+        var delivery = waiting
+        val file = pdfFile(directory, delivery.id, delivery.fileName) ?: return false
+        if (!isPdf(file)) delivery = download(config, delivery, file)?.also { deliveries.save(it) } ?: return false
+        sender.unavailableReason()?.let { reason ->
+            // Not counted as an attempt: it is tried again at every check, and the operator is told once.
+            val message = "Not sent automatically: $reason"
+            if (delivery.errorMessage != message) {
+                delivery = save(delivery.copy(errorMessage = message))
+                notifyOperator(delivery, file)
+                ack(config, delivery.id, STATE_NOTIFIED, message)
+            }
+            return false
+        }
+        val destination = delivery.destinationGroup?.takeIf { it.isNotBlank() } ?: settingsDestination.trim()
+        val attempt = delivery.autoAttempts + 1
+        var local = save(delivery.copy(autoAttempts = attempt))
+        logger.info(TAG, "Sending PDF automatically: ${local.fileName} → \"$destination\" (attempt $attempt)")
+        val progress = object : PdfSendProgress {
+            override suspend fun beforePressSend() {
+                if (!local.autoPressed) local = save(local.copy(autoPressed = true))
+            }
+
+            override suspend fun sendNotRegistered() {
+                local = save(local.copy(autoPressed = false))
+            }
+        }
+        val request = PdfSendRequest(
+            deliveryId = local.id,
+            destinationGroup = destination,
+            sourceGroup = sourceGroup.takeIf { it.isNotBlank() },
+            file = file,
+            fileName = local.fileName,
+            caption = local.caption,
+            pressedEarlier = delivery.autoPressed,
+        )
+        val outcome = runCatching { sender.send(request, progress) }.getOrElse { e ->
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            SendOutcome.Failed("Automatic sending stopped: ${e.javaClass.simpleName}")
+        }
+        return when (outcome) {
+            is SendOutcome.Sent -> {
+                local = save(local.copy(status = SENT, sentAt = clock(), sentAutomatically = true, errorMessage = null))
+                logger.info(TAG, "PDF SENT automatically to \"$destination\": ${outcome.verification}")
+                sink.reportSent(local)
+                ack(config, local.id, STATE_SENT)
+                true
+            }
+            is SendOutcome.Failed -> {
+                val last = !outcome.retryable || attempt >= MAX_AUTO_ATTEMPTS
+                val message = "Not sent automatically: ${outcome.reason}" + if (last) "" else " (tried again in a few minutes)"
+                local = save(local.copy(errorMessage = message, autoAttempts = if (outcome.retryable) attempt else MAX_AUTO_ATTEMPTS))
+                logger.warn(TAG, "PDF ${local.fileName} not sent automatically (attempt $attempt): ${outcome.reason}")
+                // The operator can send it by hand at once; a later automatic attempt cancels the notification.
+                notifyOperator(local, file)
+                ack(config, local.id, STATE_NOTIFIED, message)
+                false
+            }
+        }
+    }
+
+    /**
+     * When the next automatic PDF attempt is due (after a failed one), or null. The report watcher and the alarm
+     * use it so a retry does not wait for the 15-minute check.
+     */
+    suspend fun nextAutoRetryAt(): Long? = deliveries.withStatus(READY_FOR_WHATSAPP)
+        .filter { it.autoAttempts in 1 until MAX_AUTO_ATTEMPTS }
+        .minOfOrNull { it.updatedAt + AUTO_RETRY_MILLIS }
+
+    private fun notifyOperator(delivery: ConsolidatedReportDelivery, file: File) {
+        if (sink.reportReady(delivery, file)) {
+            logger.info(TAG, "PDF ready to send by hand: ${delivery.fileName} → ${delivery.destinationGroup ?: "destination group not set"}")
+        } else {
+            logger.warn(TAG, "PDF ready but notifications are blocked; open the app to send ${delivery.fileName}")
+        }
+    }
+
+    private suspend fun save(delivery: ConsolidatedReportDelivery): ConsolidatedReportDelivery =
+        delivery.copy(updatedAt = clock()).also { deliveries.save(it) }
 
     private fun epochMillis(iso: String?): Long? = iso?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() }
 
@@ -156,7 +280,7 @@ class ConsolidatedReportCheckUseCase(
         // download and no second notification; just report the state again.
         if (local.status == READY_FOR_WHATSAPP && isPdf(file)) {
             deliveries.save(local)
-            ack(config, local.id, STATE_NOTIFIED)
+            ack(config, local.id, STATE_NOTIFIED, local.errorMessage)
             return false
         }
 
@@ -166,13 +290,17 @@ class ConsolidatedReportCheckUseCase(
         } else {
             download(config, local, file) ?: return false
         }
-        deliveries.save(local)
-        if (sink.reportReady(local, file)) {
-            logger.info(TAG, "PDF ready to send: ${local.fileName} → ${local.destinationGroup ?: "destination group not set"}")
+        val unavailable = pdfSender?.unavailableReason()
+        if (pdfSender != null && unavailable == null) {
+            // Sent automatically right after this loop; the operator is only notified if that fails.
+            deliveries.save(local)
+            logger.info(TAG, "PDF ready: ${local.fileName}; sending it automatically")
         } else {
-            logger.warn(TAG, "PDF ready but notifications are blocked; open the app to send ${local.fileName}")
+            if (unavailable != null) local = local.copy(errorMessage = "Not sent automatically: $unavailable")
+            deliveries.save(local)
+            notifyOperator(local, file)
         }
-        ack(config, local.id, STATE_NOTIFIED)
+        ack(config, local.id, STATE_NOTIFIED, local.errorMessage)
         return true
     }
 
@@ -220,8 +348,13 @@ class ConsolidatedReportCheckUseCase(
         return ShareTarget(ready, file) to null
     }
 
-    /** WhatsApp's share screen was opened with the PDF. This is NOT proof that it was sent. */
-    suspend fun markOpened(id: String) = transition(id, OPENED_IN_WHATSAPP, STATE_OPENED) { it.copy(openedAt = clock(), errorMessage = null) }
+    /**
+     * WhatsApp's share screen was opened with the PDF. This is NOT proof that it was sent. The operator handles
+     * this report from now on: it is not sent automatically any more (no duplicates).
+     */
+    suspend fun markOpened(id: String) = transition(id, OPENED_IN_WHATSAPP, STATE_OPENED) {
+        it.copy(openedAt = clock(), errorMessage = null, autoAttempts = MAX_AUTO_ATTEMPTS)
+    }
 
     /** The operator confirmed in the app that the report was sent to the destination group. */
     suspend fun confirmSent(id: String) = transition(id, SENT, STATE_SENT) { it.copy(sentAt = clock(), errorMessage = null) }
@@ -325,6 +458,9 @@ class ConsolidatedReportCheckUseCase(
         const val STATE_FAILED = "failed"
         const val REMOVED_ON_PHONE = "Removed on the bridge phone"
         const val MAX_DOWNLOAD_ATTEMPTS = 5
+        /** Automatic PDF attempts before it is left to the operator. */
+        const val MAX_AUTO_ATTEMPTS = 3
+        const val AUTO_RETRY_MILLIS = 2L * 60 * 1000
         private const val FILE_RETENTION_MILLIS = 7L * 24 * 60 * 60 * 1000
         private const val ROW_RETENTION_MILLIS = 30L * 24 * 60 * 60 * 1000
         private val SAFE_NAME = Regex("^[A-Za-z0-9_.-]{1,120}\\.pdf$")

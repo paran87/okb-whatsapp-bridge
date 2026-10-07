@@ -147,6 +147,12 @@ data class ConsolidatedReportDelivery(
     val downloadedAt: Long? = null,
     val openedAt: Long? = null,
     val sentAt: Long? = null,
+    /** Automatic sending attempts so far (WhatsApp driven by the accessibility service). */
+    val autoAttempts: Int = 0,
+    /** An automatic attempt pressed Send without confirming it: the next one only checks the chat (no duplicates). */
+    val autoPressed: Boolean = false,
+    /** SENT by the phone itself, not confirmed by the operator. */
+    val sentAutomatically: Boolean = false,
 ) {
     val isTest: Boolean get() = kind == "test"
 }

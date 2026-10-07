@@ -9,5 +9,5 @@
     <string name="report_channel_name">Consolidated reports</string>
     <string name="report_channel_description">Consolidated flood monitoring reports ready to send to the WhatsApp group.</string>
     <string name="accessibility_service_label">OKB Bridge automatic text reports</string>
-    <string name="accessibility_service_description">Sends the consolidated flood TEXT report automatically into the WhatsApp destination group configured in OKB Bridge (6:00 AM, 6:00 PM, 12:00 AM). It works only inside WhatsApp, only while a report is being sent, and reads nothing else.</string>
+    <string name="accessibility_service_description">Sends the consolidated flood reports (text and PDF) automatically into the WhatsApp destination group configured in OKB Bridge, at the dates of sending set in the Command Center. It works only inside WhatsApp, only while a report is being sent, and reads nothing else.</string>
 </resources>

@@ -50,7 +50,7 @@ fun ReportGroupsPanel(
             label = { Text("Destination Group") },
             placeholder = { Text("OKB COMMAND CENTER") },
             leadingIcon = { Icon(Icons.AutoMirrored.Outlined.CallMissedOutgoing, contentDescription = "Outgoing") },
-            supportingText = { Text("WhatsApp group the consolidated TEXT report is sent to automatically (and the PDF manually).") },
+            supportingText = { Text("WhatsApp group the consolidated TEXT and PDF reports are sent to automatically.") },
             isError = problem != null,
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),

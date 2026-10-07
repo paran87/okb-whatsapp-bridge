@@ -20,6 +20,7 @@ import com.okb.whatsappbridge.domain.model.BridgeSettings
 import com.okb.whatsappbridge.domain.model.ConsolidatedDeliveryCounts
 import com.okb.whatsappbridge.domain.model.ConsolidatedDeliveryStatus
 import com.okb.whatsappbridge.domain.model.ConsolidatedReportDelivery
+import com.okb.whatsappbridge.domain.usecase.ConsolidatedReportCheckUseCase
 import com.okb.whatsappbridge.ui.dashboard.DashboardScreen
 import com.okb.whatsappbridge.ui.settings.ReportGroupsPanel
 import com.okb.whatsappbridge.ui.theme.OkbBridgeTheme
@@ -90,11 +91,26 @@ class ReportGroupsRenderTest {
     )
 
     @Test
-    fun `TEST 7 - the PDF card names the destination group and offers Send as PDF (the only manual action)`() {
-        var sent: String? = null
-        render("report-ready-card") {
-            DashboardScreen(state(delivery(ConsolidatedDeliveryStatus.READY_FOR_WHATSAPP)), now, {}, {}, {}, {}, {}, onSendReport = { sent = it })
+    fun `a new PDF is sent automatically - the card says so and still offers Send as PDF`() {
+        render("report-sending-card") {
+            DashboardScreen(state(delivery(ConsolidatedDeliveryStatus.READY_FOR_WHATSAPP)), now, {}, {}, {}, {}, {})
         }
+        compose.onNodeWithText("SENDING AUTOMATICALLY", useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("The phone sends it to “OKB COMMAND CENTER” by itself in a moment. Tap Send as PDF only to send it yourself now.").assertExists()
+        compose.onNodeWithText("Send as PDF").assertExists()
+    }
+
+    @Test
+    fun `TEST 7 - a PDF that could not be sent automatically names the destination group and offers Send as PDF`() {
+        var sent: String? = null
+        val failed = delivery(ConsolidatedDeliveryStatus.READY_FOR_WHATSAPP).copy(
+            autoAttempts = ConsolidatedReportCheckUseCase.MAX_AUTO_ATTEMPTS,
+            errorMessage = "Not sent automatically: WhatsApp search was not found",
+        )
+        render("report-ready-card") {
+            DashboardScreen(state(failed), now, {}, {}, {}, {}, {}, onSendReport = { sent = it })
+        }
+        compose.onNodeWithText("Not sent automatically: WhatsApp search was not found", useUnmergedTree = true).assertExists()
         compose.onNodeWithText("PDF READY").assertExists()
         compose.onNodeWithText("WAITING FOR OPERATOR", useUnmergedTree = true).assertExists()
         compose.onNodeWithText("WhatsApp share screen will open. Select “OKB COMMAND CENTER” and press Send.").assertExists()
@@ -137,7 +153,7 @@ class ReportGroupsRenderTest {
         compose.onNodeWithText("Source Group").assertExists()
         compose.onNodeWithText("Destination Group").assertExists()
         compose.onNodeWithText("WhatsApp group where flood/activity reports are received.").assertExists()
-        compose.onNodeWithText("WhatsApp group the consolidated TEXT report is sent to automatically (and the PDF manually).").assertExists()
+        compose.onNodeWithText("WhatsApp group the consolidated TEXT and PDF reports are sent to automatically.").assertExists()
         compose.onNodeWithText("The source and destination groups must be different groups.").assertExists()
         compose.onNodeWithText("Save groups").assertIsNotEnabled()
     }

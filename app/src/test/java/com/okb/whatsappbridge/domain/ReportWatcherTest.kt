@@ -37,10 +37,26 @@ class ReportWatcherTest {
     }
     private var checks = 0
 
+    private var localRetry: Long? = null
+
     private fun watcher(api: Api, monitoring: Boolean = true) = ReportWatcher(
         FakeSettingsRepository(BridgeSettings(backendUrl = "https://okb.test", monitoringEnabled = monitoring)),
         SecureDeviceIdentityRepository(InMemorySecretStore()), api, scheduler, { checks++ }, RecordingLogger(), clock = { now },
+        localRetryAt = { localRetry },
     )
+
+    @Test
+    fun `a PDF whose automatic send failed is retried when its retry time comes (alarm and poll)`() = runTest {
+        val api = Api()
+        val w = watcher(api)
+        localRetry = now + 10_000
+        assertEquals(10_000 + ReportWatcher.JUST_AFTER_MS, w.pollOnce())
+        assertEquals(null to now + 10_000, alarms.single())
+        assertEquals(0, checks)
+        now += 10_000
+        assertEquals(ReportWatcher.AFTER_CHECK_MS, w.pollOnce())
+        assertEquals(1, checks)
+    }
 
     private fun iso(offsetMs: Long) = Instant.ofEpochMilli(now + offsetMs).toString()
 

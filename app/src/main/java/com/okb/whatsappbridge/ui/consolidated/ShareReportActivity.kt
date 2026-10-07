@@ -20,13 +20,14 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 /**
- * "Send as PDF" (from the "PDF Ready" notification or Dashboard card): the MANUAL PDF delivery. No UI of its own.
+ * "Send as PDF" (from the "PDF Ready" notification or Dashboard card): the MANUAL PDF delivery, used when the
+ * phone could not send the PDF automatically (or the operator wants to send it now). No UI of its own.
  *
  * Opens WhatsApp's share screen with the consolidated PDF attached and the short caption filled in, and copies
  * the caption to the clipboard as a fallback. The operator selects the configured DESTINATION group and presses
  * Send. Opening the share screen is recorded as "opened in WhatsApp" only; the operator confirms "sent" in the
- * app afterwards. The PDF is deliberately not automated; only the consolidated TEXT report is sent
- * automatically (TextDeliveryUseCase / WhatsAppAutomationService), never through this share screen.
+ * app afterwards. From then on the report is not sent automatically (no duplicates). Automatic sending is
+ * ConsolidatedReportCheckUseCase / WhatsAppPdfSender.
  */
 class ShareReportActivity : Activity() {
 

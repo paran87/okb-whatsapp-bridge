@@ -34,6 +34,8 @@ class ReportWatcher(
     private val clock: () -> Long = System::currentTimeMillis,
     /** Called before every poll: keeps the CPU awake so the loop also runs with the screen off. */
     private val keepAwake: () -> Unit = {},
+    /** When a retry kept on this phone is due (a PDF whose automatic send failed), or null. */
+    private val localRetryAt: suspend () -> Long? = { null },
 ) {
     private var job: Job? = null
     private var lastAlarm: Pair<Long?, Long?>? = null
@@ -75,7 +77,9 @@ class ReportWatcher(
             is ApiResult.HttpError -> return if (r.httpCode == 404) OLD_BACKEND_MS else POLL_MS
             is ApiResult.NetworkError, is ApiResult.ConfigurationError -> return POLL_MS
         }
-        if ((next.due || next.textWaiting || next.pdfWaiting) && clock() - lastCheckAt >= MIN_CHECK_GAP_MS) {
+        val localRetry = localRetryAt()
+        val localDue = localRetry != null && localRetry <= clock()
+        if ((next.due || next.textWaiting || next.pdfWaiting || localDue) && clock() - lastCheckAt >= MIN_CHECK_GAP_MS) {
             lastCheckAt = clock()
             logger.info(TAG, "Report due now: checking immediately")
             runCheck() // sets the alarms itself
@@ -83,7 +87,7 @@ class ReportWatcher(
             return AFTER_CHECK_MS
         }
         val nextCutoff = millis(next.nextCutoffAt)
-        val nextRetry = millis(next.nextRetryAt)
+        val nextRetry = listOfNotNull(millis(next.nextRetryAt), localRetry).minOrNull()
         val alarm = nextCutoff to nextRetry
         if (alarm != lastAlarm) {
             wakeScheduler?.scheduleNext(nextCutoff, nextRetry)

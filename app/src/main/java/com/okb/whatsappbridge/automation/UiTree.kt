@@ -37,6 +37,12 @@ interface WhatsAppUi {
     fun launch(packageName: String): Boolean
     fun back(): Boolean
     fun home(): Boolean
+
+    /**
+     * Opens WhatsApp's own "Send to" screen with [file] (a PDF) attached and [caption] filled in, as a fresh
+     * task. False when it could not be started.
+     */
+    fun shareFile(packageName: String, file: java.io.File, caption: String): Boolean = false
 }
 
 /** Tree helpers. */

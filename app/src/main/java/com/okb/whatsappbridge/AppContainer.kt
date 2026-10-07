@@ -106,7 +106,7 @@ class AppContainer(private val app: Application) {
     // Consolidated WhatsApp reports: PDFs downloaded for the one-tap share live in the app sandbox.
     val consolidatedReportDirectory: File by lazy { File(app.filesDir, "consolidated") }
     val consolidatedDeliveries by lazy { RoomConsolidatedDeliveryRepository(database.consolidatedDeliveryDao()) }
-    // Automatic consolidated TEXT reports: sent to the destination group through the accessibility service.
+    // Automatic consolidated TEXT and PDF reports: sent to the destination group through the accessibility service.
     val textDeliveries by lazy { RoomTextDeliveryRepository(database.textDeliveryDao()) }
     val automaticTextSender by lazy { AndroidAutomaticTextSender(app, logger) }
     val textDelivery by lazy { TextDeliveryUseCase(api, textDeliveries, automaticTextSender, logger) }
@@ -115,7 +115,7 @@ class AppContainer(private val app: Application) {
         ConsolidatedReportCheckUseCase(
             settingsRepository, identity, api, consolidatedDeliveries, consolidatedReportDirectory,
             AndroidConsolidatedReportNotifier(app), logger,
-            textDelivery = textDelivery, wakeScheduler = reportWakeScheduler,
+            textDelivery = textDelivery, wakeScheduler = reportWakeScheduler, pdfSender = automaticTextSender,
         )
     }
     /** Polls the backend every ~30 s while monitoring is on, so scheduled reports go out within seconds. */
@@ -125,6 +125,7 @@ class AppContainer(private val app: Application) {
         ReportWatcher(
             settingsRepository, identity, api, reportWakeScheduler, { consolidatedReports() }, logger,
             keepAwake = { reportKeepAwake.renew() },
+            localRetryAt = { consolidatedReports.nextAutoRetryAt() },
         )
     }
     val healthCheck by lazy {

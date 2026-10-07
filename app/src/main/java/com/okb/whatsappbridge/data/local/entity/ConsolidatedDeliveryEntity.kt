@@ -1,5 +1,6 @@
 package com.okb.whatsappbridge.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -37,4 +38,8 @@ data class ConsolidatedDeliveryEntity(
     val downloadedAt: Long?,
     val openedAt: Long?,
     val sentAt: Long?,
+    /** Automatic PDF sending (Room v6). */
+    @ColumnInfo(defaultValue = "0") val autoAttempts: Int = 0,
+    @ColumnInfo(defaultValue = "0") val autoPressed: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val sentAutomatically: Boolean = false,
 )

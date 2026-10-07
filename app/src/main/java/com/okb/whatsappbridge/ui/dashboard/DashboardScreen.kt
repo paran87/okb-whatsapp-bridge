@@ -102,7 +102,7 @@ fun DashboardScreen(
             }
         }
 
-        // Consolidated PDFs waiting for the operator: "Send as PDF" is the only manual action.
+        // Consolidated PDFs not sent yet: sent automatically, with "Send as PDF" as the manual fallback.
         state.deliveries.filter { it.needsAttention(now) }.forEach { delivery ->
             item(key = "delivery-${delivery.id}", span = { GridItemSpan(maxLineSpan) }) {
                 ConsolidatedReportCard(

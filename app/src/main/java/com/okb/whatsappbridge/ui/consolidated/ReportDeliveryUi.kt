@@ -17,6 +17,7 @@ import com.okb.whatsappbridge.domain.model.BridgeSettings
 import com.okb.whatsappbridge.domain.model.ConsolidatedDeliveryCounts
 import com.okb.whatsappbridge.domain.model.ConsolidatedDeliveryStatus
 import com.okb.whatsappbridge.domain.model.ConsolidatedReportDelivery
+import com.okb.whatsappbridge.domain.usecase.ConsolidatedReportCheckUseCase
 import com.okb.whatsappbridge.ui.StatusPresentation
 import com.okb.whatsappbridge.ui.components.ButtonRow
 import com.okb.whatsappbridge.ui.components.ConfirmDialog
@@ -70,7 +71,7 @@ fun ReportGroupsStatusPanel(
         )
         StatusLine("Backend", backend.level, backend.label)
         // Label above the counts: side by side, the long counts line squeezed the label on phones.
-        Text("PDFs (manual)", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+        Text("PDFs", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
         Text(
             "Pending ${counts.pending} · Ready ${counts.ready} · Sent ${counts.sent} · Failed ${counts.failed}",
             style = MaterialTheme.typography.bodyMedium,
@@ -84,8 +85,9 @@ fun ReportGroupsStatusPanel(
 }
 
 /**
- * Consolidated PDF (MANUAL): "PDF Ready" with "Send as PDF", the only manual action. WhatsApp's share screen
- * opens; the operator selects the destination group, presses Send and confirms here. Never marked sent by itself.
+ * Consolidated PDF: sent automatically by the phone; while that is pending or after it failed, "Send as PDF"
+ * lets the operator send it by hand (WhatsApp's share screen opens; the operator selects the destination group,
+ * presses Send and confirms here; a manual send is never marked sent by itself).
  */
 @Composable
 fun ConsolidatedReportCard(
@@ -100,7 +102,14 @@ fun ConsolidatedReportCard(
     var confirmRemove by remember { mutableStateOf(false) }
     val destination = delivery.destinationGroup?.takeIf { it.isNotBlank() } ?: settings.destinationGroupName.ifBlank { null }
     val source = delivery.sourceGroup?.takeIf { it.isNotBlank() } ?: settings.sourceGroupName.ifBlank { null }
-    val (level, label) = delivery.status.label()
+    val automatic = delivery.status == ConsolidatedDeliveryStatus.READY_FOR_WHATSAPP &&
+        delivery.autoAttempts < ConsolidatedReportCheckUseCase.MAX_AUTO_ATTEMPTS
+    val (level, label) = when {
+        delivery.status == ConsolidatedDeliveryStatus.SENT && delivery.sentAutomatically -> StatusLevel.OK to "Sent automatically"
+        automatic && delivery.errorMessage == null -> StatusLevel.INFO to "Sending automatically"
+        automatic && delivery.autoAttempts > 0 -> StatusLevel.WARNING to "Retrying automatically"
+        else -> delivery.status.label()
+    }
     val title = when {
         delivery.status == ConsolidatedDeliveryStatus.FAILED -> if (delivery.isTest) "CONSOLIDATED PDF · TEST" else "CONSOLIDATED PDF"
         delivery.isTest -> "PDF Ready · TEST"
@@ -117,8 +126,12 @@ fun ConsolidatedReportCard(
             ConsolidatedDeliveryStatus.READY_FOR_WHATSAPP -> {
                 Button(onClick = onSend, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Send as PDF") }
                 Hint(
-                    if (destination != null) "WhatsApp share screen will open. Select “$destination” and press Send."
-                    else "WhatsApp share screen will open. No destination group is set — select the correct group and press Send.",
+                    when {
+                        automatic && delivery.errorMessage == null ->
+                            "The phone sends it${destination?.let { " to “$it”" } ?: ""} by itself in a moment. Tap Send as PDF only to send it yourself now."
+                        destination != null -> "WhatsApp share screen will open. Select “$destination” and press Send."
+                        else -> "WhatsApp share screen will open. No destination group is set — select the correct group and press Send."
+                    },
                 )
             }
             ConsolidatedDeliveryStatus.OPENED_IN_WHATSAPP -> {

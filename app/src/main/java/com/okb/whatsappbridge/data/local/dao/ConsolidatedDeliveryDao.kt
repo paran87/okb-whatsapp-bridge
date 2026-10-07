@@ -21,6 +21,9 @@ interface ConsolidatedDeliveryDao {
     @Query("SELECT * FROM consolidated_report_deliveries WHERE pendingAck IS NOT NULL")
     suspend fun withPendingAck(): List<ConsolidatedDeliveryEntity>
 
+    @Query("SELECT * FROM consolidated_report_deliveries WHERE status = :status ORDER BY createdAt ASC")
+    suspend fun withStatus(status: String): List<ConsolidatedDeliveryEntity>
+
     @Query("SELECT status, COUNT(*) AS count FROM consolidated_report_deliveries GROUP BY status")
     fun observeStatusCounts(): Flow<List<DeliveryStatusCount>>
 

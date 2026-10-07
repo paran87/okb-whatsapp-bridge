@@ -4,6 +4,7 @@ import com.okb.whatsappbridge.domain.model.BridgeLogEntry
 import com.okb.whatsappbridge.domain.model.BridgeMessage
 import com.okb.whatsappbridge.domain.model.BridgeSettings
 import com.okb.whatsappbridge.domain.model.ConsolidatedDeliveryCounts
+import com.okb.whatsappbridge.domain.model.ConsolidatedDeliveryStatus
 import com.okb.whatsappbridge.domain.model.ConsolidatedReportDelivery
 import com.okb.whatsappbridge.domain.model.MediaStatus
 import com.okb.whatsappbridge.domain.model.MediaType
@@ -159,6 +160,8 @@ interface ConsolidatedDeliveryRepository {
     fun observeRecent(limit: Int = 20): Flow<List<ConsolidatedReportDelivery>>
     fun observeCounts(): Flow<ConsolidatedDeliveryCounts>
     suspend fun withPendingAck(): List<ConsolidatedReportDelivery>
+    /** Oldest first. */
+    suspend fun withStatus(status: ConsolidatedDeliveryStatus): List<ConsolidatedReportDelivery>
     suspend fun delete(id: String)
     suspend fun deleteFinishedBefore(before: Long): Int
 }

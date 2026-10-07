@@ -30,6 +30,13 @@ sealed interface SendOutcome {
     data class Failed(val reason: String, val retryable: Boolean = true) : SendOutcome
 }
 
+/** Result of [WhatsAppTextSender.lookInChat]. */
+sealed interface ChatSearch {
+    data object Found : ChatSearch
+    data object NotFound : ChatSearch
+    data class Failed(val reason: String) : ChatSearch
+}
+
 /** Callbacks that let the caller persist progress before and after the irreversible step (pressing Send). */
 interface SendProgress {
     suspend fun beforePressSend(ref: String)
@@ -101,6 +108,17 @@ class WhatsAppTextSender(
         } catch (e: Abort) {
             e.outcome
         }
+    }
+
+    /**
+     * Opens the destination chat and looks for [needle] (e.g. a PDF's file name) in it, scrolling back through
+     * recent history. Used to confirm a send whose result is not known; nothing is typed or sent.
+     */
+    suspend fun lookInChat(packageName: String, destination: String, needle: String): ChatSearch = try {
+        openChat(packageName, destination.trim())
+        if (findInChat(needle, searchHistory = true) != null) ChatSearch.Found else ChatSearch.NotFound
+    } catch (e: Abort) {
+        ChatSearch.Failed(e.outcome.reason)
     }
 
     // ---- open the destination chat ------------------------------------------------------------------------

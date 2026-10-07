@@ -36,7 +36,7 @@ closed, the screen is off, the phone is locked, or another app is in the foregro
 9. [Physical-device acceptance tests](#physical-device-acceptance-tests)
 10. [Architecture](#architecture)
 11. [Building and testing](#building-and-testing)
-12. [Consolidated WhatsApp reports: automatic TEXT, manual PDF](#consolidated-whatsapp-reports-automatic-text-manual-pdf)
+12. [Consolidated WhatsApp reports: automatic TEXT and PDF](#consolidated-whatsapp-reports-automatic-text-and-pdf)
 13. [Known limitations](#known-limitations)
 
 ---
@@ -878,17 +878,17 @@ height, coordinates, report time) stay `null`, with `".010 m"` left un-normalize
    as reports (`?status=ignored` shows any that reached the backend).
 
 > Do not claim these passed until executed on the physical device.
-## Consolidated WhatsApp reports: automatic TEXT, manual PDF
+## Consolidated WhatsApp reports: automatic TEXT and PDF
 
 Each scheduled consolidated report (6:00 AM, 6:00 PM, 12:00 AM Manila time, set in the Command Center) has
 **two independent deliveries** (`delivery_type` on the backend):
 
 | | TEXT report | PDF report |
 |---|---|---|
-| Delivery | **Automatic.** The bridge sends it into the destination group by itself | **Manual.** The operator taps **Send as PDF** and sends it from WhatsApp's share screen |
-| Operator action | None (works at 12:00 AM with the phone locked and nobody awake) | Tap, select the group, press Send, confirm in the app |
-| Status | Scheduled → Sending → **Sent** / Failed (retried automatically) | PDF Ready → Opened in WhatsApp → Sent (operator confirmed) / Failed |
-| Marked sent | Only when the message is seen in the destination chat | Only when the operator confirms |
+| Delivery | **Automatic.** The bridge sends it into the destination group by itself | **Automatic** (app 1.5.0+), through WhatsApp's "Send to" screen. Fallback: the operator taps **Send as PDF** |
+| Operator action | None (works at 12:00 AM with the phone locked and nobody awake) | None; only when automatic sending fails: tap, select the group, press Send, confirm in the app |
+| Status | Scheduled → Sending → **Sent** / Failed (retried automatically) | Sending automatically → **Sent** (or Retrying → PDF Ready for the operator) / Failed |
+| Marked sent | Only when the message is seen in the destination chat | When the phone sees the chat open after Send (file name read back where readable), or the operator confirms |
 
 A period with **no reports** produces **no TEXT report**.
 
@@ -901,7 +901,7 @@ and every check:
 | Setting | Purpose |
 |---|---|
 | **Source Group** (e.g. *NMDEO FLOOD MONITORING*) | WhatsApp group where flood/activity reports are received. Only this group is captured. **Never** a destination. |
-| **Destination Group** (e.g. *OKB COMMAND CENTER*) | Where the consolidated TEXT report is sent automatically (and the PDF manually). **Never captured** as a report. |
+| **Destination Group** (e.g. *OKB COMMAND CENTER*) | Where the consolidated TEXT and PDF reports are sent automatically. **Never captured** as a report. |
 
 - With no Source Group set, the groups authorized on the Groups tab are captured (previous behaviour).
 - The Destination Group is excluded from capture even if it is on the Groups allowlist.
@@ -920,9 +920,10 @@ chat and not "pending" ─▶ home screen, screen off again ─▶ result to the
 ```
 
 - **How WhatsApp is driven.** Android has no API to send a WhatsApp message without the share screen
-  (`ACTION_SEND` always opens it, so it is used only for the PDF). The TEXT report is therefore sent by an
-  **AccessibilityService** (`service/WhatsAppAutomationService`) that the operator enables once. It is
-  limited to the WhatsApp packages, reads no events, and does nothing unless a TEXT job is being sent. The
+  (`ACTION_SEND` always opens it). The TEXT report is therefore typed into the chat by an
+  **AccessibilityService** (`service/WhatsAppAutomationService`) that the operator enables once; the PDF uses
+  WhatsApp's share screen, driven by the same service (see below). It is limited to the WhatsApp packages,
+  reads no events, and does nothing unless a report is being sent. The
   send flow is `automation/WhatsAppTextSender` (pure Kotlin, unit-tested against a simulated WhatsApp);
   the screen/lock handling is `automation/AndroidAutomaticTextSender` + `automation/UnlockActivity`.
 - **On time while asleep.** After every check the backend reports the next cut-off; the phone sets an exact
@@ -973,32 +974,43 @@ chat and not "pending" ─▶ home screen, screen off again ─▶ result to the
    "Next check … 12:01 AM (exact)".
 2. Daytime dry run: press **Test Send** in the Command Center, then **Check now** on the phone. Within a
    minute a `TEST REPORT` message appears in the destination group by itself; the history shows
-   *Automatic text: Sent*; the phone shows *PDF Ready* (not sent).
+   *Automatic text: Sent*. For an entry sent as PDF, the PDF appears in the group the same way.
 3. Make sure at least one field report arrives in the source group before midnight. Lock the phone and
    leave it (screen off, charging).
 4. After 12:01 AM: the destination group has the consolidated TEXT report once; Command Center history shows
-   *Automatic text: Sent → OKB COMMAND CENTER* with the time; the phone's screen is off again; the PDF waits
-   for **Send as PDF**.
+   *Automatic text: Sent → OKB COMMAND CENTER* with the time; the phone's screen is off again. A PDF entry
+   is sent the same way (history: PDF *Sent*).
 5. Negative checks: with a PIN set, the attempt fails with the screen-lock reason and nothing is sent; with
    no reports in the period, no TEXT report is created.
 
-### Manual PDF report
+### Automatic PDF report
 
 The backend generates the consolidated PDF. Each check lists the PDFs waiting for **this** phone, tracked
 locally (Room table `consolidated_report_deliveries`):
 
 ```
-READY_TO_SEND → DOWNLOADING → READY_FOR_WHATSAPP → OPENED_IN_WHATSAPP → SENT (operator confirms)
-                                     ↑_____________ "Not sent" ____________|      FAILED (download failed)
+READY_TO_SEND → DOWNLOADING → READY_FOR_WHATSAPP → SENT (sent automatically, or operator confirms)
+                                     ↓       ↑ "Not sent"                FAILED (download failed)
+                              OPENED_IN_WHATSAPP (manual "Send as PDF")
 ```
 
 - The PDF is downloaded into the app sandbox, checked to be a complete PDF (`%PDF-` … `%%EOF`) and shared
-  only through the FileProvider. A report id is downloaded and offered once; acknowledgements made while
-  offline are retried on the next check. Five failed downloads (or a 404) mark it FAILED.
-- The Dashboard shows **PDF Ready** (source, destination, file name) with **Send as PDF**, the only manual
-  action; a notification does the same. **Send as PDF** opens WhatsApp's share screen with the PDF and
-  caption; select the Destination Group and press Send, then answer **Yes, sent** or **Not sent** in the
-  app. The PDF is never marked SENT by itself.
+  only through the FileProvider. A report id is downloaded once; acknowledgements made while offline are
+  retried on the next check. Five failed downloads (or a 404) mark it FAILED.
+- **Sent automatically** right after the download (`automation/WhatsAppPdfSender`): wake and unlock the
+  screen as for the TEXT report → share the PDF to WhatsApp → on WhatsApp's "Send to" list select the row
+  named exactly like the DESTINATION group (else WhatsApp search) → press WhatsApp's Send, plus the preview's
+  Send or the "Send to …?" dialog, whichever this WhatsApp version shows → check the chat that opens is that
+  group and the file name is in it → home screen, screen off again → `sent` to the backend.
+- **Never twice.** "Send pressed" is saved before every press. If an attempt pressed Send but could not
+  confirm the result, the next attempt does not share the PDF again: it opens the chat and looks for the file
+  name. Found → SENT; not found → left to the operator.
+- **When it cannot.** Accessibility off, WhatsApp not on screen, group not found…: the reason is shown on the
+  card, in a **PDF Ready** notification and in the Command Center, and the phone tries again 2 minutes later
+  (alarm and report watcher), up to 3 attempts. The operator can always tap **Send as PDF**: WhatsApp's share
+  screen opens with the PDF and caption; select the Destination Group and press Send, then answer **Yes,
+  sent** or **Not sent** in the app. After the operator opens the share screen the phone never sends that
+  PDF by itself. A manual send is never marked SENT without the operator's answer.
 
 ### What is verified and what is not
 

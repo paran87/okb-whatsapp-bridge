@@ -41,7 +41,7 @@ import com.okb.whatsappbridge.data.local.entity.WhatsAppMessageEntity
         ConsolidatedDeliveryEntity::class,
         TextDeliveryEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class BridgeDatabase : RoomDatabase() {
