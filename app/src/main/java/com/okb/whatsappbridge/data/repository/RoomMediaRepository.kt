@@ -25,6 +25,8 @@ class RoomMediaRepository(
     private val idGenerator: () -> String = { UUID.randomUUID().toString() },
 ) : MediaRepository {
 
+    override suspend fun findReacquirable(messageId: String): String? = dao.reacquirableIdForMessage(messageId)
+
     override suspend fun createDetected(media: NewMediaAttachment): String? {
         // One media row per message in Phase 2 (a notification message carries at most one attachment).
         if (dao.countForMessage(media.messageId) > 0) return null

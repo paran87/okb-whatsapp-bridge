@@ -134,6 +134,49 @@ class MediaCaptureTest {
     }
 
     @Test
+    fun `photo whose URI arrives only on a later re-post is acquired then`() = runTest {
+        // WhatsApp's first notification (photo still downloading) has no URI; the re-post carries one.
+        bridge.process(photo(uri = null))
+        val messageId = lastMessageId()
+        assertEquals(MediaAcquisitionStatus.UNAVAILABLE, mediaRow(messageId)!!.acquisitionStatus)
+
+        val uri = "content://com.whatsapp.provider/media/late"
+        bridge.content.bytesByUri[uri] = imageBytes
+        val outcome = bridge.process(photo(uri)) as ProcessingOutcome.Captured
+        assertEquals(0, outcome.inserted)
+        assertEquals(1, outcome.duplicates)
+
+        val media = mediaRow(messageId)!!
+        assertEquals(MediaAcquisitionStatus.AVAILABLE, media.acquisitionStatus)
+        assertEquals(imageBytes.size.toLong(), media.fileSizeBytes)
+        assertTrue(media.hasLocalFile)
+        assertEquals(1, bridge.db.mediaDao().countAll())
+        assertEquals(1, bridge.media.countUploadable(includeFailed = false))
+        assertTrue(bridge.scheduler.mediaRequests.isNotEmpty())
+    }
+
+    @Test
+    fun `re-post without a URI leaves the photo UNAVAILABLE`() = runTest {
+        bridge.process(photo(uri = null))
+        bridge.process(photo(uri = null))
+        assertEquals(MediaAcquisitionStatus.UNAVAILABLE, mediaRow(lastMessageId())!!.acquisitionStatus)
+        assertEquals(0, bridge.media.countUploadable(includeFailed = false))
+    }
+
+    @Test
+    fun `late URI for a deleted message is not acquired`() = runTest {
+        bridge.process(photo(uri = null))
+        val messageId = lastMessageId()
+        bridge.messages.moveToRecycleBin(listOf(messageId), T0 + 2000)
+
+        val uri = "content://com.whatsapp.provider/media/deleted"
+        bridge.content.bytesByUri[uri] = imageBytes
+        bridge.process(photo(uri))
+        assertEquals(MediaAcquisitionStatus.UNAVAILABLE, mediaRow(messageId)!!.acquisitionStatus)
+        assertEquals(0, bridge.media.countUploadable(includeFailed = false))
+    }
+
+    @Test
     fun `media capture can be disabled without affecting text capture`() = runTest {
         bridge.settings.setCaptureMedia(false)
         val outcome = bridge.process(photo("content://x/off").also { bridge.content.bytesByUri["content://x/off"] = imageBytes })

@@ -117,6 +117,9 @@ class ProcessNotificationUseCase(
                 }
             } else {
                 duplicates++
+                if (outcome.messageId != null && isMediaMessage(message) && current.captureMedia) {
+                    retryMedia(outcome.messageId, message)
+                }
             }
         }
 
@@ -130,6 +133,27 @@ class ProcessNotificationUseCase(
 
     private fun isMediaMessage(message: ParsedMessage): Boolean =
         message.mediaType != MediaType.TEXT && message.mediaType != MediaType.LOCATION
+
+    /**
+     * WhatsApp posts a photo's notification before the photo has downloaded and re-posts the conversation later
+     * (with the next message, or when the download finishes). If a re-post now carries a content URI for a photo
+     * whose first capture found none, acquire it now. Returns true if an acquisition was attempted.
+     */
+    private suspend fun retryMedia(messageId: String, message: ParsedMessage): Boolean {
+        if (message.dataUri.isNullOrBlank()) return false
+        val mediaRepo = media ?: return false
+        val acquire = acquireMedia ?: return false
+        val mediaId = mediaRepo.findReacquirable(messageId) ?: return false
+        acquire(
+            MediaAcquisitionRequest(
+                mediaId = mediaId,
+                mediaType = message.mediaType,
+                dataUri = message.dataUri,
+                dataMimeType = message.dataMimeType,
+            ),
+        )
+        return true
+    }
 
     /** Creates the media row and attempts acquisition. Returns true if a media row was created. */
     private suspend fun handleMedia(messageId: String, group: String, message: ParsedMessage, now: Long): Boolean {

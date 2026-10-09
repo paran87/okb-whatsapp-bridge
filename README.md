@@ -491,7 +491,14 @@ Therefore the realistic outcome on most devices is a clean **media-unavailable**
   `AccessibilityService` to obtain media, or requires root;
 - requests **no storage permission** (the primary strategy needs none);
 - when no legitimate file is available, records `acquisitionStatus = UNAVAILABLE` with an
-  operator-readable reason, keeps the text/caption, and does not invent a workaround.
+  operator-readable reason, keeps the text/caption, and does not invent a workaround;
+- (1.5.4) tries again when WhatsApp re-posts the conversation and the re-post now carries a URI for a
+  photo whose first notification had none (WhatsApp notifies before the photo has downloaded). Deleted
+  messages are never re-acquired.
+
+The two "unavailable" reasons tell a real-device test what happened: *"WhatsApp did not attach the
+original file to the notification"* = no URI at all; *"Android did not provide an accessible media
+file"* = a URI was present but not readable by the bridge.
 
 > This is a deliberate architecture: media acquisition can be improved later (e.g. a future
 > MediaStore-based strategy on devices that expose shared media) without changing the database,

@@ -44,6 +44,10 @@ abstract class MessageDao {
     @Query("SELECT COUNT(*) FROM messages WHERE fingerprint = :fingerprint")
     abstract suspend fun countByFingerprint(fingerprint: String): Int
 
+    /** The stored message with this fingerprint, unless it was deleted (bin or tombstone). */
+    @Query("SELECT id FROM messages WHERE fingerprint = :fingerprint AND deletedAt IS NULL LIMIT 1")
+    abstract suspend fun activeIdByFingerprint(fingerprint: String): String?
+
     @Query(
         """
         SELECT m.*, COALESCE(q.attemptCount, 0) AS attemptCount

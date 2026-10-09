@@ -41,6 +41,15 @@ abstract class MediaDao {
     @Query("SELECT COUNT(*) FROM media WHERE messageId = :messageId")
     abstract suspend fun countForMessage(messageId: String): Int
 
+    /** A media row of this message that ended without a file (UNAVAILABLE/FAILED) and may be acquired again. */
+    @Query(
+        """
+        SELECT id FROM media WHERE messageId = :messageId AND acquisitionStatus IN ('UNAVAILABLE', 'FAILED')
+          AND localPath IS NULL LIMIT 1
+        """,
+    )
+    abstract suspend fun reacquirableIdForMessage(messageId: String): String?
+
     @Query("SELECT * FROM media WHERE messageId = :messageId ORDER BY createdAt ASC")
     abstract fun observeForMessage(messageId: String): Flow<List<MediaAttachmentEntity>>
 

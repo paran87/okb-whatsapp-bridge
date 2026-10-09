@@ -32,6 +32,7 @@ data class NewCapturedMessage(
 enum class SaveResult { INSERTED, DUPLICATE }
 
 /** Result of persisting a captured message, carrying the new row id when inserted. */
+/** [messageId] is the new row for INSERTED, the existing (not deleted) row for DUPLICATE, or null. */
 data class SaveOutcome(val result: SaveResult, val messageId: String?)
 
 /** A queued message selected for upload. */

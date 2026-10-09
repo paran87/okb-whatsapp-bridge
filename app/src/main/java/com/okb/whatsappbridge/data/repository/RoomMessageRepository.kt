@@ -46,7 +46,7 @@ class RoomMessageRepository(
             notificationKey = message.notificationKey,
         )
         return if (dao.insertCaptured(entity, enqueuedAt = message.capturedAt)) SaveOutcome(SaveResult.INSERTED, id)
-        else SaveOutcome(SaveResult.DUPLICATE, null)
+        else SaveOutcome(SaveResult.DUPLICATE, dao.activeIdByFingerprint(message.fingerprint))
     }
 
     override fun observeRecent(status: UploadStatus?, limit: Int): Flow<List<BridgeMessage>> =

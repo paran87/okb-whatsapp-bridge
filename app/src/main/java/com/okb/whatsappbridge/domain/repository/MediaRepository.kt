@@ -44,6 +44,9 @@ interface MediaRepository {
     /** Inserts a DETECTED media row; returns its id, or null if the message already has media. */
     suspend fun createDetected(media: NewMediaAttachment): String?
 
+    /** Id of this message's media row that ended without a file (UNAVAILABLE/FAILED), or null. */
+    suspend fun findReacquirable(messageId: String): String?
+
     suspend fun markAcquiring(id: String, at: Long)
     suspend fun markAvailableAndEnqueue(
         id: String, localPath: String, sizeBytes: Long, sha256: String, mimeType: String?, originalFileName: String?, at: Long,
